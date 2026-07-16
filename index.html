@@ -529,6 +529,16 @@
         <div><label>Carb goal (g)</label><input type="number" inputmode="numeric" id="goalCarb"></div>
       </div>
       <button class="submit-btn" id="goalSubmit">Save goals</button>
+      <h3 style="margin-top:18px;">Cloud sync</h3>
+      <label>Supabase project URL</label>
+      <input type="url" id="syncUrl" placeholder="https://xxxx.supabase.co">
+      <label>Supabase anon key</label>
+      <input type="password" id="syncAnonKey" placeholder="Paste anon public key">
+      <label>Sync ID</label>
+      <input type="text" id="syncId" placeholder="e.g. my-plates-log" maxlength="80">
+      <button class="submit-btn" id="syncSave">Save sync settings</button>
+      <button class="submit-btn" id="syncNow" style="background:var(--surface-2); color:var(--text); border:1px solid var(--border);">Sync now</button>
+      <div class="sub" id="syncStatus" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim); margin-top:2px;"></div>
       <button class="danger-btn" id="resetAll">Erase all data</button>
     </div>
   </div>
@@ -573,8 +583,148 @@
   }
   async function setJSON(key, value){
     if(!storageAvailable){ toastStorageWarning(); return; }
-    try{ window.localStorage.setItem(NS+key, JSON.stringify(value)); }
+    try{
+      window.localStorage.setItem(NS+key, JSON.stringify(value));
+      markSyncDirty(key);
+      queueCloudPush(key, value);
+    }
     catch(e){ console.error('storage set failed', key, e); toastStorageWarning(); }
+  }
+  function getLocalOnlyJSON(key, fallback){
+    if(!storageAvailable) return fallback;
+    try{
+      const raw = window.localStorage.getItem(NS+key);
+      return raw === null || raw === undefined ? fallback : JSON.parse(raw);
+    }catch(e){ return fallback; }
+  }
+  function setLocalOnlyJSON(key, value){
+    if(!storageAvailable) return;
+    try{ window.localStorage.setItem(NS+key, JSON.stringify(value)); }
+    catch(e){ console.error('local-only storage set failed', key, e); }
+  }
+  function setSyncedLocalJSON(key, value, updatedAt){
+    if(!storageAvailable) return;
+    try{
+      window.localStorage.setItem(NS+key, JSON.stringify(value));
+      const meta = getSyncMeta();
+      meta[key] = updatedAt || new Date().toISOString();
+      setLocalOnlyJSON('__sync_meta', meta);
+    }catch(e){ console.error('synced local storage set failed', key, e); }
+  }
+  function markSyncDirty(key){
+    if(key.indexOf('__sync_')===0) return;
+    const meta = getSyncMeta();
+    meta[key] = new Date().toISOString();
+    setLocalOnlyJSON('__sync_meta', meta);
+  }
+  function getSyncMeta(){ return getLocalOnlyJSON('__sync_meta', {}); }
+  function getSyncSettings(){ return getLocalOnlyJSON('__sync_settings', { url:'', anonKey:'', syncId:'' }); }
+  function hasSyncSettings(){
+    const s = getSyncSettings();
+    return !!(s.url && s.anonKey && s.syncId);
+  }
+  function syncStatus(msg){
+    const el = document.getElementById('syncStatus');
+    if(el) el.textContent = msg || '';
+  }
+  function listSyncedKeys(){
+    if(!storageAvailable) return [];
+    const keys = [];
+    for(let i=0; i<window.localStorage.length; i++){
+      const full = window.localStorage.key(i);
+      if(!full || full.indexOf(NS)!==0) continue;
+      const key = full.slice(NS.length);
+      if(key.indexOf('__sync_')===0) continue;
+      keys.push(key);
+    }
+    return keys;
+  }
+  function supabaseHeaders(settings, extra){
+    return Object.assign({
+      apikey: settings.anonKey,
+      Authorization: 'Bearer '+settings.anonKey,
+      'Content-Type': 'application/json'
+    }, extra || {});
+  }
+  function supabaseBase(settings){
+    return settings.url.replace(/\/+$/,'') + '/rest/v1/plates_kv';
+  }
+  let cloudPushTimer = null;
+  let cloudPushInFlight = false;
+  function queueCloudPush(key, value){
+    if(!hasSyncSettings() || key.indexOf('__sync_')===0) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(()=>{ syncToCloud([key]).catch(e=>console.warn('sync push failed', e)); }, 600);
+  }
+  async function syncToCloud(onlyKeys){
+    if(cloudPushInFlight || !hasSyncSettings()) return;
+    const settings = getSyncSettings();
+    const keys = onlyKeys && onlyKeys.length ? onlyKeys : listSyncedKeys();
+    if(!keys.length) return;
+    cloudPushInFlight = true;
+    try{
+      const meta = getSyncMeta();
+      const rows = keys.map(key => ({
+        owner_id: settings.syncId,
+        key,
+        value: getLocalOnlyJSON(key, null),
+        updated_at: meta[key] || new Date().toISOString()
+      }));
+      const res = await fetch(supabaseBase(settings), {
+        method:'POST',
+        headers: supabaseHeaders(settings, { Prefer:'resolution=merge-duplicates' }),
+        body: JSON.stringify(rows)
+      });
+      if(!res.ok) throw new Error(await res.text());
+      syncStatus('Synced '+new Date().toLocaleTimeString([], {hour:'numeric', minute:'2-digit'}));
+    }finally{
+      cloudPushInFlight = false;
+    }
+  }
+  async function pullFromCloud(){
+    if(!hasSyncSettings()) return false;
+    const settings = getSyncSettings();
+    const res = await fetch(supabaseBase(settings)+'?owner_id=eq.'+encodeURIComponent(settings.syncId)+'&select=key,value,updated_at', {
+      headers: supabaseHeaders(settings)
+    });
+    if(!res.ok) throw new Error(await res.text());
+    const rows = await res.json();
+    const meta = getSyncMeta();
+    let changed = false;
+    rows.forEach(row=>{
+      const cloudTime = row.updated_at || '';
+      const localTime = meta[row.key] || '';
+      if(!localTime || cloudTime > localTime){
+        setSyncedLocalJSON(row.key, row.value, cloudTime);
+        changed = true;
+      }
+    });
+    return changed;
+  }
+  async function syncNow({silent=false}={}){
+    if(!hasSyncSettings()){
+      if(!silent) toast('Add sync settings first');
+      return;
+    }
+    try{
+      syncStatus('Syncing...');
+      const changed = await pullFromCloud();
+      await syncToCloud();
+      if(changed) await reloadStateFromStorage();
+      if(!silent) toast('Sync complete');
+    }catch(e){
+      console.error('cloud sync failed', e);
+      syncStatus('Sync failed');
+      if(!silent) toast('Sync failed - check settings/table');
+    }
+  }
+  async function clearCloudData(){
+    if(!hasSyncSettings()) return;
+    const settings = getSyncSettings();
+    await fetch(supabaseBase(settings)+'?owner_id=eq.'+encodeURIComponent(settings.syncId), {
+      method:'DELETE',
+      headers: supabaseHeaders(settings)
+    });
   }
   let storageWarned = false;
   function toastStorageWarning(){
@@ -731,6 +881,11 @@
     document.getElementById('goalCal').value = settings.calGoal;
     document.getElementById('goalProtein').value = settings.proteinGoal;
     document.getElementById('goalCarb').value = settings.carbGoal;
+    const sync = getSyncSettings();
+    document.getElementById('syncUrl').value = sync.url || '';
+    document.getElementById('syncAnonKey').value = sync.anonKey || '';
+    document.getElementById('syncId').value = sync.syncId || '';
+    syncStatus(hasSyncSettings() ? 'Cloud sync configured' : 'Local-only until configured');
     sheet.classList.add('open'); backdrop.classList.add('open');
   }
   function closeSheet(){ sheet.classList.remove('open'); backdrop.classList.remove('open'); }
@@ -744,8 +899,20 @@
     await setJSON('settings', settings);
     closeSheet(); toast('Goals saved'); renderToday();
   });
+  document.getElementById('syncSave').addEventListener('click', async ()=>{
+    const sync = {
+      url: document.getElementById('syncUrl').value.trim(),
+      anonKey: document.getElementById('syncAnonKey').value.trim(),
+      syncId: document.getElementById('syncId').value.trim()
+    };
+    if(!sync.url || !sync.anonKey || !sync.syncId){ toast('Fill all sync fields'); return; }
+    setLocalOnlyJSON('__sync_settings', sync);
+    await syncNow();
+  });
+  document.getElementById('syncNow').addEventListener('click', ()=>syncNow());
   document.getElementById('resetAll').addEventListener('click', async ()=>{
     if(!confirm('This clears all logged food, workouts, weight and goals on this device. Continue?')) return;
+    try{ await clearCloudData(); }catch(e){ console.warn('cloud reset failed', e); }
     try{
       const toRemove = [];
       for(let i=0;i<window.localStorage.length;i++){
@@ -1492,6 +1659,15 @@
   }
 
   /* ---------------- boot ---------------- */
+  async function reloadStateFromStorage(){
+    settings = await getJSON('settings', settings);
+    weights = await getJSON('weights', []);
+    const storedPlan = await getJSON('plan', null);
+    plan = storedPlan === null ? defaultPlan() : storedPlan;
+    const activeBtn = document.querySelector('.tabbar button.active');
+    showTab(activeBtn ? activeBtn.dataset.tab : 'today');
+  }
+
   // one-time backfill of the Wed 15 July Push session with the actual numbers already logged on paper
   async function seedHistoricalPush15July(){
     const seededFlag = await getJSON('seed_push_2026-07-15', false);
@@ -1544,6 +1720,7 @@
   }
 
   async function boot(){
+    await syncNow({silent:true});
     settings = await getJSON('settings', settings);
     weights = await getJSON('weights', []);
     const storedPlan = await getJSON('plan', null);
