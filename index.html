@@ -389,6 +389,29 @@
   }
   .inline-log-input::placeholder{color:var(--text-dimmer); font-weight:400;}
   .inline-log-input:focus{outline:none; border-bottom-color:var(--lime);}
+
+  .log-entry-sets{flex-direction:column; align-items:stretch;}
+  .log-entry-top{display:flex; align-items:flex-start; gap:10px;}
+  .log-entry-top .log-entry-main{display:flex; align-items:center; gap:8px; flex-wrap:wrap;}
+  .set-grid{display:flex; flex-direction:column; gap:6px; margin-top:12px; padding-left:30px;}
+  .set-row{display:grid; grid-template-columns:22px 1fr 1fr; gap:8px; align-items:center;}
+  .set-row.header{color:var(--text-dimmer); font-size:9.5px; letter-spacing:1.5px; text-transform:uppercase; font-family:'Oswald',sans-serif;}
+  .set-num{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim); text-align:center;}
+  .set-weight, .set-reps{
+    background:var(--surface-2); border:1px solid var(--border); border-radius:8px;
+    padding:9px 8px; font-size:13px; color:var(--lime); font-weight:600;
+    font-family:'JetBrains Mono',monospace; text-align:center; width:100%;
+  }
+  .set-weight::placeholder, .set-reps::placeholder{color:var(--text-dimmer); font-weight:400;}
+
+  .session-timer{margin-bottom:14px;}
+  .session-timer-inner{
+    display:flex; align-items:center; gap:6px;
+    background:var(--surface); border:1px solid var(--border); border-radius:30px;
+    padding:9px 16px; font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim);
+    width:fit-content;
+  }
+  .session-timer-inner strong{color:var(--lime); font-weight:700;}
 </style>
 </head>
 <body>
@@ -415,7 +438,7 @@
       <h2 class="section-title">This week</h2>
       <div class="stat-strip" id="weekStrip"></div>
 
-      <h2 class="section-title">Today's sessions</h2>
+      <h2 class="section-title">Today's sessions <span id="todaySessionMinutes"></span></h2>
       <div class="entry-list" id="todayWorkoutsPreview"></div>
     </section>
 
@@ -443,6 +466,7 @@
 
       <div id="routineHeader"></div>
       <div id="dayPicker"></div>
+      <div id="sessionTimer"></div>
 
       <div class="entry-list" id="trainList" style="margin-bottom:14px;"></div>
 
@@ -570,6 +594,43 @@
     return dd.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'});
   }
   function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,7); }
+
+  // pulls a leading set count out of a target like "4 × 6–8" or "3x10-12" -> 4 / 3. Returns null for time-based or unparseable targets.
+  function parseSetCount(target){
+    if(!target) return null;
+    const m = target.match(/(\d+)\s*[×xX]/);
+    if(!m) return null;
+    const n = parseInt(m[1], 10);
+    if(!n || n<1 || n>12) return null;
+    return n;
+  }
+  function setsSummary(sets){
+    if(!sets || !sets.length) return '';
+    const filled = sets.filter(s=>s.weight || s.reps);
+    if(!filled.length) return '';
+    return sets.map(s=> (s.weight||'-')+'×'+(s.reps||'-')).join(', ');
+  }
+  function sessionTimes(list){
+    const stamps = [];
+    (list||[]).forEach(item=>{
+      if(item.loggedAt) stamps.push(item.loggedAt);
+      if(item.sets) item.sets.forEach(s=>{ if(s.loggedAt) stamps.push(s.loggedAt); });
+    });
+    if(!stamps.length) return null;
+    const start = Math.min(...stamps), end = Math.max(...stamps);
+    return { start, end, minutes: Math.max(1, Math.round((end-start)/60000)) };
+  }
+  function fmtTime(ts){
+    return new Date(ts).toLocaleTimeString(undefined, {hour:'numeric', minute:'2-digit'});
+  }
+  async function updateSessionTimerDisplay(dateKey){
+    const el = document.getElementById('sessionTimer');
+    if(!el) return;
+    const list = await getJSON('workouts:'+dateKey, []);
+    const times = sessionTimes(list);
+    if(!times){ el.innerHTML = ''; return; }
+    el.innerHTML = `<div class="session-timer-inner">⏱ ${fmtTime(times.start)} – ${fmtTime(times.end)} &nbsp;·&nbsp; <strong>${times.minutes} min logged</strong></div>`;
+  }
 
   const now = new Date();
   let foodViewDate = new Date(now);
@@ -725,6 +786,9 @@
     `;
 
     const prevWrap = document.getElementById('todayWorkoutsPreview');
+    const minutesEl = document.getElementById('todaySessionMinutes');
+    const todayTimes = sessionTimes(workouts);
+    minutesEl.textContent = todayTimes ? `· ${todayTimes.minutes} min` : '';
     if(!workouts.length){
       prevWrap.innerHTML = `<div class="empty-state">No sessions logged today. Tap "Log workout" to start.</div>`;
     }else{
@@ -817,7 +881,7 @@
     if(!name){ toast('Name the exercise'); return; }
     const key = 'workouts:'+keyFor(trainViewDate);
     const list = await getJSON(key, []);
-    list.push({id:uid(), name, type:trainTypeVal, detail, done:false});
+    list.push({id:uid(), name, type:trainTypeVal, detail, done:false, loggedAt: detail ? Date.now() : null});
     await setJSON(key, list);
     document.getElementById('trainName').value='';
     document.getElementById('trainDetail').value='';
@@ -844,12 +908,30 @@
     let changed = false;
     planDay.exercises.forEach(ex=>{
       if(!list.some(w=>w.planExerciseId===ex.id)){
-        list.push({id:uid(), planExerciseId:ex.id, name:ex.name, type:planDay.name, target:ex.target, section:ex.section, detail:'', done:false});
+        const setCount = parseSetCount(ex.target);
+        const sets = setCount ? Array.from({length:setCount}, ()=>({weight:'', reps:''})) : null;
+        list.push({id:uid(), planExerciseId:ex.id, name:ex.name, type:planDay.name, target:ex.target, section:ex.section, detail:'', sets, done:false});
         changed = true;
       }
     });
     if(changed) await setJSON(key, list);
     return list;
+  }
+
+  // finds the most recent earlier log of the same exercise (by planExerciseId, or by name for custom entries)
+  // searches back up to 6 weeks so a skipped week still finds the last real session
+  async function findLastLog(refDate, planExerciseId, nameFallback){
+    for(let i=1; i<=42; i++){
+      const d = new Date(refDate);
+      d.setDate(d.getDate()-i);
+      const list = await getJSON('workouts:'+keyFor(d), null);
+      if(!list) continue;
+      const found = planExerciseId
+        ? list.find(w=>w.planExerciseId===planExerciseId)
+        : list.find(w=>w.name===nameFallback);
+      if(found) return found;
+    }
+    return null;
   }
 
   async function renderTrainTab(){
@@ -927,25 +1009,58 @@
     }else{
       let lastSection = null;
       const sortable = selectedDayId && chosenDay; // group by section only when following a routine
-      listWrap.innerHTML = list.map(w=>{
+      const rows = [];
+      for(const w of list){
         let sectionLabel = '';
         if(sortable && w.section && w.section !== lastSection){
           sectionLabel = `<div class="plan-section-label">${escapeHtml(w.section)}</div>`;
           lastSection = w.section;
         }
-        return sectionLabel + `
-          <div class="entry log-entry">
-            <label class="log-chk"><input type="checkbox" data-id="${w.id}" ${w.done?'checked':''}></label>
-            <div class="log-entry-main">
-              <div class="name">${escapeHtml(w.name)}</div>
-              <div class="sub-row">
-                ${w.target ? `<span class="log-target">${escapeHtml(w.target)}</span>` : ''}
-                <input class="inline-log-input" data-id="${w.id}" value="${escapeHtml(w.detail||'')}" placeholder="log weight × reps">
+
+        if(w.sets && w.sets.length){
+          const lastLog = await findLastLog(trainViewDate, w.planExerciseId, w.name);
+          const lastSets = (lastLog && lastLog.sets) ? lastLog.sets : [];
+          const setRows = w.sets.map((s,i)=>{
+            const lw = lastSets[i] && lastSets[i].weight ? lastSets[i].weight : 'kg';
+            const lr = lastSets[i] && lastSets[i].reps ? lastSets[i].reps : 'reps';
+            return `
+              <div class="set-row">
+                <span class="set-num">${i+1}</span>
+                <input class="set-weight" data-id="${w.id}" data-idx="${i}" data-field="weight" value="${escapeHtml(s.weight||'')}" placeholder="${escapeHtml(lw)}">
+                <input class="set-reps" data-id="${w.id}" data-idx="${i}" data-field="reps" value="${escapeHtml(s.reps||'')}" placeholder="${escapeHtml(lr)}">
+              </div>`;
+          }).join('');
+          rows.push(sectionLabel + `
+            <div class="entry log-entry log-entry-sets">
+              <div class="log-entry-top">
+                <label class="log-chk"><input type="checkbox" data-id="${w.id}" ${w.done?'checked':''}></label>
+                <div class="log-entry-main">
+                  <div class="name">${escapeHtml(w.name)}</div>
+                  ${w.target ? `<span class="log-target">${escapeHtml(w.target)}</span>` : ''}
+                </div>
+                <button class="del" data-id="${w.id}">✕</button>
               </div>
-            </div>
-            <button class="del" data-id="${w.id}">✕</button>
-          </div>`;
-      }).join('');
+              <div class="set-grid">
+                <div class="set-row header"><span></span><span>Weight</span><span>Reps</span></div>
+                ${setRows}
+              </div>
+            </div>`);
+        }else{
+          rows.push(sectionLabel + `
+            <div class="entry log-entry">
+              <label class="log-chk"><input type="checkbox" data-id="${w.id}" ${w.done?'checked':''}></label>
+              <div class="log-entry-main">
+                <div class="name">${escapeHtml(w.name)}</div>
+                <div class="sub-row">
+                  ${w.target ? `<span class="log-target">${escapeHtml(w.target)}</span>` : ''}
+                  <input class="inline-log-input" data-id="${w.id}" value="${escapeHtml(w.detail||'')}" placeholder="log weight × reps">
+                </div>
+              </div>
+              <button class="del" data-id="${w.id}">✕</button>
+            </div>`);
+        }
+      }
+      listWrap.innerHTML = rows.join('');
     }
 
     listWrap.querySelectorAll('.inline-log-input').forEach(inp=>{
@@ -953,8 +1068,26 @@
         const l = await getJSON(key, []);
         const item = l.find(x=>x.id===inp.dataset.id);
         if(!item) return;
-        item.detail = inp.value.trim();
+        const val = inp.value.trim();
+        item.detail = val;
+        if(val) item.loggedAt = Date.now();
         await setJSON(key, l);
+        updateSessionTimerDisplay(dateKey);
+      });
+    });
+    listWrap.querySelectorAll('.set-weight, .set-reps').forEach(inp=>{
+      inp.addEventListener('change', async ()=>{
+        const l = await getJSON(key, []);
+        const item = l.find(x=>x.id===inp.dataset.id);
+        if(!item || !item.sets) return;
+        const idx = parseInt(inp.dataset.idx, 10);
+        if(!item.sets[idx]) return;
+        const val = inp.value.trim();
+        item.sets[idx][inp.dataset.field] = val;
+        if(val) item.sets[idx].loggedAt = Date.now();
+        item.detail = setsSummary(item.sets);
+        await setJSON(key, l);
+        updateSessionTimerDisplay(dateKey);
       });
     });
     listWrap.querySelectorAll('.log-chk input').forEach(chk=>{
@@ -974,6 +1107,8 @@
         if(keyFor(trainViewDate)===keyFor(now)) renderToday();
       });
     });
+
+    updateSessionTimerDisplay(dateKey);
   }
 
   /* ---------------- plan tab ---------------- */
@@ -1269,6 +1404,57 @@
   }
 
   /* ---------------- boot ---------------- */
+  // one-time backfill of the Wed 15 July Push session with the actual numbers already logged on paper
+  async function seedHistoricalPush15July(){
+    const seededFlag = await getJSON('seed_push_2026-07-15', false);
+    if(seededFlag) return;
+
+    const dateKey = '2026-07-15';
+    const pushDay = plan.find(d => /push/i.test(d.name));
+    if(!pushDay){ await setJSON('seed_push_2026-07-15', true); return; }
+
+    const data = {
+      'Incline Treadmill Walk': { done:true },
+      'Band Pull-Aparts': { reps:[15,15], weights:['',''] },
+      'Shoulder External Rotations': { reps:[10,12], weights:[9,9] },
+      'Bench Press (Smith/Barbell)': { reps:[8,8,6,3], weights:[30,40,50,55] },
+      'Incline Dumbbell Press': { reps:[12,10,8], weights:[14,18,20] },
+      'High-to-Low Cable Press/Fly (Decline Alt.)': { reps:[10,10,8], weights:['20 (incline bench)',30,35] },
+      'Seated Shoulder Press': { reps:[12,10,8], weights:[12,14,16] },
+      'Cable Lateral Raise': { reps:[12,10,8], weights:[9,11,11] },
+      'Rope Triceps Pushdown': { reps:[12,12,9], weights:[27,30,32] },
+      'Overhead DB Triceps Extension (or EZ-Bar Skull Crusher)': { reps:[12,8,8], weights:[10,20,20] },
+      'Face Pull': { reps:[12,12], weights:[36,41] },
+    };
+
+    const list = await getJSON('workouts:'+dateKey, []);
+    pushDay.exercises.forEach(ex=>{
+      if(list.some(w=>w.planExerciseId===ex.id)) return; // don't duplicate if already logged
+      const setCount = parseSetCount(ex.target);
+      const sets = setCount ? Array.from({length:setCount}, ()=>({weight:'', reps:''})) : null;
+      const seed = data[ex.name];
+      let detail = '', done = false;
+      if(seed){
+        if(seed.done){
+          done = true;
+        }else if(sets && seed.reps){
+          seed.reps.forEach((r,i)=>{
+            if(sets[i]){
+              sets[i].reps = String(r);
+              sets[i].weight = seed.weights[i]!==undefined ? String(seed.weights[i]) : '';
+            }
+          });
+          detail = setsSummary(sets);
+          done = true;
+        }
+      }
+      list.push({id:uid(), planExerciseId:ex.id, name:ex.name, type:pushDay.name, target:ex.target, section:ex.section, detail, sets, done});
+    });
+    await setJSON('workouts:'+dateKey, list);
+    await setJSON('workoutDay:'+dateKey, pushDay.id);
+    await setJSON('seed_push_2026-07-15', true);
+  }
+
   async function boot(){
     settings = await getJSON('settings', settings);
     weights = await getJSON('weights', []);
@@ -1279,6 +1465,7 @@
     }else{
       plan = storedPlan;
     }
+    await seedHistoricalPush15July();
     await renderToday();
   }
   boot();
