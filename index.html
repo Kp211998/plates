@@ -642,8 +642,30 @@
   let expandedPlanDayId = null;
 
   /* ---------------- header date ---------------- */
-  document.getElementById('headerDate').textContent =
-    now.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}).toUpperCase();
+  function refreshHeaderDate(){
+    document.getElementById('headerDate').textContent =
+      now.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}).toUpperCase();
+  }
+  refreshHeaderDate();
+
+  // if the app stays open across midnight (common for an installed PWA left in the
+  // background), 'now' would otherwise stay frozen on the old day. Check for a real
+  // day change whenever the app regains focus/visibility, and periodically while open.
+  function checkDateRollover(){
+    const fresh = new Date();
+    if(keyFor(fresh) === keyFor(now)) return;
+    const oldKey = keyFor(now);
+    now.setTime(fresh.getTime());
+    refreshHeaderDate();
+    if(keyFor(foodViewDate) === oldKey) foodViewDate = new Date(now);
+    if(keyFor(trainViewDate) === oldKey) trainViewDate = new Date(now);
+    const activeBtn = document.querySelector('.tabbar button.active');
+    showTab(activeBtn ? activeBtn.dataset.tab : 'today');
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(!document.hidden) checkDateRollover(); });
+  window.addEventListener('focus', checkDateRollover);
+  window.addEventListener('pageshow', checkDateRollover);
+  setInterval(checkDateRollover, 60000);
 
   /* ---------------- tab switching ---------------- */
   const tabs = ['today','food','train','weight'];
