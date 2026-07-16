@@ -1,4 +1,4 @@
-const CACHE = 'plates-v1';
+const CACHE = 'plates-v3';
 const ASSETS = [
   './',
   './index.html',

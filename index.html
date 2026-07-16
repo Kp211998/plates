@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -604,6 +604,31 @@
     if(!n || n<1 || n>12) return null;
     return n;
   }
+  const WEEKDAY_NAMES = [
+    ['sun','sunday'], ['mon','monday'], ['tue','tues','tuesday'], ['wed','wednesday'],
+    ['thu','thur','thurs','thursday'], ['fri','friday'], ['sat','saturday']
+  ];
+  function planDayHasWeekday(day){
+    if(!day) return false;
+    const name = String(day.name || '').toLowerCase();
+    return WEEKDAY_NAMES.some(names => names.some(n => new RegExp(`\\b${n}\\b`).test(name)));
+  }
+  function planDayMatchesDate(day, date){
+    if(!day) return false;
+    const name = String(day.name || '').toLowerCase();
+    return WEEKDAY_NAMES[date.getDay()].some(n => new RegExp(`\\b${n}\\b`).test(name));
+  }
+  function defaultPlanDayForDate(date){
+    return plan.find(day => planDayMatchesDate(day, date)) || null;
+  }
+  function isBlankRoutineEntry(w){
+    if(!w || !w.planExerciseId) return false;
+    const hasDetail = String(w.detail || '').trim().length > 0;
+    const hasSets = Array.isArray(w.sets) && w.sets.some(s =>
+      String((s && s.weight) || '').trim() || String((s && s.reps) || '').trim()
+    );
+    return !w.done && !hasDetail && !hasSets;
+  }
   function setsSummary(sets){
     if(!sets || !sets.length) return '';
     const filled = sets.filter(s=>s.weight || s.reps);
@@ -640,6 +665,7 @@
   let weights = []; // {id, date:'YYYY-MM-DD', value}
   let plan = []; // [{id, name, exercises:[{id, name, target, section}]}]
   let expandedPlanDayId = null;
+  let forceRoutinePickerForDate = null;
 
   /* ---------------- header date ---------------- */
   function refreshHeaderDate(){
@@ -940,13 +966,25 @@
     return list;
   }
 
-  // finds the most recent earlier log of the same exercise (by planExerciseId, or by name for custom entries)
-  // searches back up to 6 weeks so a skipped week still finds the last real session
-  async function findLastLog(refDate, planExerciseId, nameFallback){
-    for(let i=1; i<=42; i++){
+  async function cleanupBlankRoutineEntries(dateKey, selectedDayId){
+    const chosenDay = plan.find(d=>d.id===selectedDayId);
+    if(!chosenDay) return;
+    const allowedIds = new Set(chosenDay.exercises.map(ex=>ex.id));
+    const key = 'workouts:'+dateKey;
+    const list = await getJSON(key, []);
+    const next = list.filter(w => !w.planExerciseId || allowedIds.has(w.planExerciseId) || !isBlankRoutineEntry(w));
+    if(next.length !== list.length) await setJSON(key, next);
+  }
+  // finds the most recent earlier log of the same exercise on the same weekday/routine day
+  // searches back by weeks so Thursday placeholders come from the previous Thursday, not Wednesday
+  async function findLastLog(refDate, planExerciseId, nameFallback, routineDayId){
+    for(let i=7; i<=84; i+=7){
       const d = new Date(refDate);
       d.setDate(d.getDate()-i);
-      const list = await getJSON('workouts:'+keyFor(d), null);
+      const dateKey = keyFor(d);
+      const pastDayId = await getJSON('workoutDay:'+dateKey, null);
+      if(routineDayId && pastDayId && pastDayId !== routineDayId) continue;
+      const list = await getJSON('workouts:'+dateKey, null);
       if(!list) continue;
       const found = planExerciseId
         ? list.find(w=>w.planExerciseId===planExerciseId)
@@ -959,10 +997,30 @@
   async function renderTrainTab(){
     renderTrainDateNav();
     const dateKey = keyFor(trainViewDate);
-    const selectedDayId = await getJSON('workoutDay:'+dateKey, null);
+    let selectedDayId = await getJSON('workoutDay:'+dateKey, null);
     const headerWrap = document.getElementById('routineHeader');
     const pickerWrap = document.getElementById('dayPicker');
     const listWrap = document.getElementById('trainList');
+
+    const autoDay = defaultPlanDayForDate(trainViewDate);
+    const manualDayOverride = await getJSON('workoutDayManual:'+dateKey, false);
+    const savedDay = (selectedDayId && selectedDayId !== '__none__') ? plan.find(d=>d.id===selectedDayId) : null;
+    if(autoDay && !selectedDayId && forceRoutinePickerForDate !== dateKey){
+      selectedDayId = autoDay.id;
+      await setJSON('workoutDay:'+dateKey, selectedDayId);
+      await setJSON('workoutDayManual:'+dateKey, false);
+      await cleanupBlankRoutineEntries(dateKey, selectedDayId);
+    }else if(!manualDayOverride && autoDay && savedDay && savedDay.id !== autoDay.id && planDayHasWeekday(savedDay) && planDayHasWeekday(autoDay)){
+      const existingList = await getJSON('workouts:'+dateKey, []);
+      const savedExerciseIds = new Set(savedDay.exercises.map(ex=>ex.id));
+      const hasLoggedSavedDay = existingList.some(w => savedExerciseIds.has(w.planExerciseId) && !isBlankRoutineEntry(w));
+      if(!hasLoggedSavedDay){
+        selectedDayId = autoDay.id;
+        await setJSON('workoutDay:'+dateKey, selectedDayId);
+        await setJSON('workoutDayManual:'+dateKey, false);
+        await cleanupBlankRoutineEntries(dateKey, selectedDayId);
+      }
+    }
 
     const chosenDay = (selectedDayId && selectedDayId !== '__none__')
       ? plan.find(d=>d.id===selectedDayId) : null;
@@ -982,7 +1040,10 @@
       }
       pickerWrap.querySelectorAll('.day-chip').forEach(btn=>{
         btn.addEventListener('click', async ()=>{
+          forceRoutinePickerForDate = null;
           await setJSON('workoutDay:'+dateKey, btn.dataset.day);
+          await setJSON('workoutDayManual:'+dateKey, true);
+          if(btn.dataset.day !== '__none__') await cleanupBlankRoutineEntries(dateKey, btn.dataset.day);
           renderTrainTab();
         });
       });
@@ -1001,9 +1062,12 @@
         </div>`;
       document.getElementById('editRoutineBtn').addEventListener('click', openPlanSheet);
       document.getElementById('changeDayBtn').addEventListener('click', async ()=>{
+        forceRoutinePickerForDate = dateKey;
         await setJSON('workoutDay:'+dateKey, null);
+        await setJSON('workoutDayManual:'+dateKey, false);
         renderTrainTab();
       });
+      await cleanupBlankRoutineEntries(dateKey, chosenDay.id);
       await ensureDayExercisesLogged(dateKey, chosenDay);
     }else{
       // '__none__' freeform day
@@ -1019,7 +1083,9 @@
           </div>
         </div>`;
       document.getElementById('changeDayBtn').addEventListener('click', async ()=>{
+        forceRoutinePickerForDate = dateKey;
         await setJSON('workoutDay:'+dateKey, null);
+        await setJSON('workoutDayManual:'+dateKey, false);
         renderTrainTab();
       });
     }
@@ -1040,7 +1106,7 @@
         }
 
         if(w.sets && w.sets.length){
-          const lastLog = await findLastLog(trainViewDate, w.planExerciseId, w.name);
+          const lastLog = await findLastLog(trainViewDate, w.planExerciseId, w.name, selectedDayId);
           const lastSets = (lastLog && lastLog.sets) ? lastLog.sets : [];
           const setRows = w.sets.map((s,i)=>{
             const lw = lastSets[i] && lastSets[i].weight ? lastSets[i].weight : 'kg';
