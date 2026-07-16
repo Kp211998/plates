@@ -351,6 +351,44 @@
     background:none; border:1px solid var(--red); color:var(--red); border-radius:10px; padding:11px 14px;
     font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:1px; text-transform:uppercase; cursor:pointer;
   }
+
+  /* ---------- train tab: routine picker + logging ---------- */
+  .day-picker-chips{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;}
+  .day-chip{
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    padding:11px 14px; border-radius:30px; font-family:'Oswald',sans-serif; font-size:12.5px;
+    letter-spacing:0.5px; cursor:pointer;
+  }
+  .day-chip:active{background:var(--surface-2);}
+  .day-chip.none{color:var(--text-dim); border-style:dashed;}
+  .routine-header{
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-sm);
+    padding:13px 16px; margin-bottom:16px;
+  }
+  .routine-name{font-family:'Oswald',sans-serif; font-weight:600; font-size:15px; letter-spacing:0.5px;}
+  .routine-sub{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dimmer); margin-top:2px;}
+  .routine-actions{display:flex; gap:8px;}
+  .icon-btn.sm{width:32px; height:32px; font-size:14px;}
+  .log-entry{align-items:flex-start; gap:10px;}
+  .log-chk{padding-top:2px;}
+  .log-chk input{
+    width:20px; height:20px; accent-color:var(--lime); cursor:pointer;
+  }
+  .log-entry-main{flex:1; min-width:0;}
+  .sub-row{display:flex; align-items:center; gap:8px; margin-top:5px; flex-wrap:wrap;}
+  .log-target{
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dimmer);
+    background:var(--surface-2); border-radius:6px; padding:3px 7px; white-space:nowrap;
+  }
+  .inline-log-input{
+    flex:1; min-width:110px;
+    background:transparent; border:none; border-bottom:1px solid var(--border);
+    color:var(--lime); font-family:'JetBrains Mono',monospace; font-size:12.5px;
+    padding:3px 2px; font-weight:600;
+  }
+  .inline-log-input::placeholder{color:var(--text-dimmer); font-weight:400;}
+  .inline-log-input:focus{outline:none; border-bottom-color:var(--lime);}
 </style>
 </head>
 <body>
@@ -402,7 +440,13 @@
     <!-- TRAIN -->
     <section class="tab" id="tab-train">
       <div class="date-nav" id="trainDateNav"></div>
-      <button class="form-toggle" id="trainFormToggle">+ Add workout</button>
+
+      <div id="routineHeader"></div>
+      <div id="dayPicker"></div>
+
+      <div class="entry-list" id="trainList" style="margin-bottom:14px;"></div>
+
+      <button class="form-toggle" id="trainFormToggle">+ Add extra exercise</button>
       <div class="add-form" id="trainForm">
         <label>Type</label>
         <div class="seg" id="trainType">
@@ -416,17 +460,6 @@
         <input type="text" id="trainDetail" placeholder="e.g. 4x8 @ 80kg, or 30 min @ tempo">
         <button class="submit-btn" id="trainSubmit">Add session</button>
       </div>
-      <h2 class="section-title">Logged</h2>
-      <div class="entry-list" id="trainList"></div>
-    </section>
-
-    <!-- PLAN -->
-    <section class="tab" id="tab-plan">
-      <div class="plan-toolbar">
-        <button class="plan-edit-toggle" id="planEditToggle">Edit plan</button>
-        <button class="plan-add-day" id="planAddDay">+ Add day</button>
-      </div>
-      <div id="planDays"></div>
     </section>
 
     <!-- WEIGHT -->
@@ -456,7 +489,6 @@
     <button class="active" data-tab="today"><span class="ic">◆</span>Today</button>
     <button data-tab="food"><span class="ic">🍽</span>Food</button>
     <button data-tab="train"><span class="ic">🏋</span>Train</button>
-    <button data-tab="plan"><span class="ic">📋</span>Plan</button>
     <button data-tab="weight"><span class="ic">⚖</span>Weight</button>
   </nav>
 
@@ -477,8 +509,20 @@
     </div>
   </div>
 
+  <div class="sheet-backdrop" id="planSheetBackdrop"></div>
+  <div class="sheet" id="planSheet" style="max-height:82vh; overflow-y:auto;">
+    <div class="sheet-handle"></div>
+    <button class="close-sheet" id="closePlanSheet">✕</button>
+    <h3>Edit routines</h3>
+    <div class="plan-toolbar">
+      <button class="plan-add-day" id="planAddDay" style="flex:1;">+ Add day</button>
+    </div>
+    <div id="planDays"></div>
+  </div>
+
   <div class="toast" id="toast"></div>
 </div>
+
 
 <script>
 (function(){
@@ -534,7 +578,6 @@
   let settings = { calGoal: 2200, proteinGoal: 150, carbGoal: 220 };
   let weights = []; // {id, date:'YYYY-MM-DD', value}
   let plan = []; // [{id, name, exercises:[{id, name, target, section}]}]
-  let planEditMode = false;
   let expandedPlanDayId = null;
 
   /* ---------------- header date ---------------- */
@@ -542,7 +585,7 @@
     now.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}).toUpperCase();
 
   /* ---------------- tab switching ---------------- */
-  const tabs = ['today','food','train','plan','weight'];
+  const tabs = ['today','food','train','weight'];
   function showTab(name){
     tabs.forEach(t=>{
       document.getElementById('tab-'+t).classList.toggle('active', t===name);
@@ -552,7 +595,6 @@
     });
     if(name==='food') renderFoodTab();
     if(name==='train') renderTrainTab();
-    if(name==='plan') renderPlanTab();
     if(name==='weight') renderWeightTab();
     if(name==='today') renderToday();
   }
@@ -605,6 +647,8 @@
     }catch(e){ console.error(e); }
     settings = { calGoal: 2200, proteinGoal: 150, carbGoal: 220 };
     weights = [];
+    plan = defaultPlan();
+    await setJSON('plan', plan);
     closeSheet(); toast('All data erased');
     renderToday();
   });
@@ -773,13 +817,14 @@
     if(!name){ toast('Name the exercise'); return; }
     const key = 'workouts:'+keyFor(trainViewDate);
     const list = await getJSON(key, []);
-    list.push({id:uid(), name, type:trainTypeVal, detail});
+    list.push({id:uid(), name, type:trainTypeVal, detail, done:false});
     await setJSON(key, list);
     document.getElementById('trainName').value='';
     document.getElementById('trainDetail').value='';
     trainForm.classList.remove('open');
-    toast('Workout logged');
+    toast('Exercise added');
     renderTrainTab();
+    if(keyFor(trainViewDate)===keyFor(now)) renderToday();
   });
   function renderTrainDateNav(){
     const wrap = document.getElementById('trainDateNav');
@@ -791,35 +836,137 @@
     document.getElementById('trainPrev').onclick = ()=>{ trainViewDate.setDate(trainViewDate.getDate()-1); renderTrainTab(); };
     document.getElementById('trainNext').onclick = ()=>{ if(keyFor(trainViewDate)!==keyFor(now)){ trainViewDate.setDate(trainViewDate.getDate()+1); renderTrainTab(); } };
   }
+
+  // ensure the exercises from a chosen plan day exist as loggable entries for a given date
+  async function ensureDayExercisesLogged(dateKey, planDay){
+    const key = 'workouts:'+dateKey;
+    const list = await getJSON(key, []);
+    let changed = false;
+    planDay.exercises.forEach(ex=>{
+      if(!list.some(w=>w.planExerciseId===ex.id)){
+        list.push({id:uid(), planExerciseId:ex.id, name:ex.name, type:planDay.name, target:ex.target, section:ex.section, detail:'', done:false});
+        changed = true;
+      }
+    });
+    if(changed) await setJSON(key, list);
+    return list;
+  }
+
   async function renderTrainTab(){
     renderTrainDateNav();
-    const key = 'workouts:'+keyFor(trainViewDate);
-    const list = await getJSON(key, []);
-    const wrap = document.getElementById('trainList');
-    if(!list.length){
-      wrap.innerHTML = `<div class="empty-state">No sessions this day.</div>`;
-      return;
-    }
-    wrap.innerHTML = list.slice().reverse().map(w=>`
-      <div class="entry">
-        <div class="entry-edit-target" data-id="${w.id}"><div class="name">${escapeHtml(w.name)}</div>
-        <div class="sub">${escapeHtml(w.type)} · ${escapeHtml(w.detail||'tap to add weight/reps')}</div></div>
-        <button class="del" data-id="${w.id}">✕</button>
-      </div>`).join('');
-    wrap.querySelectorAll('.entry-edit-target').forEach(el=>{
-      el.style.cursor = 'pointer';
-      el.addEventListener('click', async ()=>{
-        const l = await getJSON(key, []);
-        const item = l.find(x=>x.id===el.dataset.id);
-        if(!item) return;
-        const val = prompt('Sets/reps/weight for "'+item.name+'"', item.detail||'');
-        if(val === null) return;
-        item.detail = val.trim();
-        await setJSON(key, l);
+    const dateKey = keyFor(trainViewDate);
+    const selectedDayId = await getJSON('workoutDay:'+dateKey, null);
+    const headerWrap = document.getElementById('routineHeader');
+    const pickerWrap = document.getElementById('dayPicker');
+    const listWrap = document.getElementById('trainList');
+
+    const chosenDay = (selectedDayId && selectedDayId !== '__none__')
+      ? plan.find(d=>d.id===selectedDayId) : null;
+
+    if(!selectedDayId){
+      // no choice made yet for this date — show picker
+      headerWrap.innerHTML = '';
+      if(!plan.length){
+        pickerWrap.innerHTML = `<div class="empty-state">No routines set up yet. Open "Edit routines" to build one, or just add exercises below.</div>`;
+      }else{
+        pickerWrap.innerHTML = `
+          <div class="section-title" style="margin-top:0;">Which day is this?</div>
+          <div class="day-picker-chips">
+            ${plan.map(d=>`<button class="day-chip" data-day="${d.id}">${escapeHtml(d.name)}</button>`).join('')}
+            <button class="day-chip none" data-day="__none__">No routine today</button>
+          </div>`;
+      }
+      pickerWrap.querySelectorAll('.day-chip').forEach(btn=>{
+        btn.addEventListener('click', async ()=>{
+          await setJSON('workoutDay:'+dateKey, btn.dataset.day);
+          renderTrainTab();
+        });
+      });
+    }else if(chosenDay){
+      pickerWrap.innerHTML = '';
+      headerWrap.innerHTML = `
+        <div class="routine-header">
+          <div>
+            <div class="routine-name">${escapeHtml(chosenDay.name)}</div>
+            <div class="routine-sub">${chosenDay.exercises.length} exercises</div>
+          </div>
+          <div class="routine-actions">
+            <button class="icon-btn sm" id="editRoutineBtn" title="Edit routines">✎</button>
+            <button class="icon-btn sm" id="changeDayBtn" title="Change day">↺</button>
+          </div>
+        </div>`;
+      document.getElementById('editRoutineBtn').addEventListener('click', openPlanSheet);
+      document.getElementById('changeDayBtn').addEventListener('click', async ()=>{
+        await setJSON('workoutDay:'+dateKey, null);
         renderTrainTab();
       });
+      await ensureDayExercisesLogged(dateKey, chosenDay);
+    }else{
+      // '__none__' freeform day
+      pickerWrap.innerHTML = '';
+      headerWrap.innerHTML = `
+        <div class="routine-header">
+          <div>
+            <div class="routine-name">Freeform session</div>
+            <div class="routine-sub">No routine assigned</div>
+          </div>
+          <div class="routine-actions">
+            <button class="icon-btn sm" id="changeDayBtn" title="Pick a routine">↺</button>
+          </div>
+        </div>`;
+      document.getElementById('changeDayBtn').addEventListener('click', async ()=>{
+        await setJSON('workoutDay:'+dateKey, null);
+        renderTrainTab();
+      });
+    }
+
+    const key = 'workouts:'+dateKey;
+    const list = await getJSON(key, []);
+    if(!list.length){
+      listWrap.innerHTML = selectedDayId ? `<div class="empty-state">No exercises yet — add one below.</div>` : '';
+    }else{
+      let lastSection = null;
+      const sortable = selectedDayId && chosenDay; // group by section only when following a routine
+      listWrap.innerHTML = list.map(w=>{
+        let sectionLabel = '';
+        if(sortable && w.section && w.section !== lastSection){
+          sectionLabel = `<div class="plan-section-label">${escapeHtml(w.section)}</div>`;
+          lastSection = w.section;
+        }
+        return sectionLabel + `
+          <div class="entry log-entry">
+            <label class="log-chk"><input type="checkbox" data-id="${w.id}" ${w.done?'checked':''}></label>
+            <div class="log-entry-main">
+              <div class="name">${escapeHtml(w.name)}</div>
+              <div class="sub-row">
+                ${w.target ? `<span class="log-target">${escapeHtml(w.target)}</span>` : ''}
+                <input class="inline-log-input" data-id="${w.id}" value="${escapeHtml(w.detail||'')}" placeholder="log weight × reps">
+              </div>
+            </div>
+            <button class="del" data-id="${w.id}">✕</button>
+          </div>`;
+      }).join('');
+    }
+
+    listWrap.querySelectorAll('.inline-log-input').forEach(inp=>{
+      inp.addEventListener('change', async ()=>{
+        const l = await getJSON(key, []);
+        const item = l.find(x=>x.id===inp.dataset.id);
+        if(!item) return;
+        item.detail = inp.value.trim();
+        await setJSON(key, l);
+      });
     });
-    wrap.querySelectorAll('.del').forEach(btn=>{
+    listWrap.querySelectorAll('.log-chk input').forEach(chk=>{
+      chk.addEventListener('change', async ()=>{
+        const l = await getJSON(key, []);
+        const item = l.find(x=>x.id===chk.dataset.id);
+        if(!item) return;
+        item.done = chk.checked;
+        await setJSON(key, l);
+      });
+    });
+    listWrap.querySelectorAll('.del').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const l = await getJSON(key, []);
         await setJSON(key, l.filter(x=>x.id!==btn.dataset.id));
@@ -907,76 +1054,58 @@
     ];
   }
 
-  document.getElementById('planEditToggle').addEventListener('click', ()=>{
-    planEditMode = !planEditMode;
+  function openPlanSheet(){
     renderPlanTab();
-  });
+    document.getElementById('planSheet').classList.add('open');
+    document.getElementById('planSheetBackdrop').classList.add('open');
+  }
+  function closePlanSheetFn(){
+    document.getElementById('planSheet').classList.remove('open');
+    document.getElementById('planSheetBackdrop').classList.remove('open');
+    renderTrainTab(); // reflect any plan edits back in the Train tab
+  }
+  document.getElementById('closePlanSheet').addEventListener('click', closePlanSheetFn);
+  document.getElementById('planSheetBackdrop').addEventListener('click', closePlanSheetFn);
+
   document.getElementById('planAddDay').addEventListener('click', async ()=>{
     plan.push({id:uid(), name:'New Day', exercises:[]});
     expandedPlanDayId = plan[plan.length-1].id;
-    planEditMode = true;
     await setJSON('plan', plan);
     renderPlanTab();
   });
 
   function renderPlanTab(){
-    const toggleBtn = document.getElementById('planEditToggle');
-    toggleBtn.textContent = planEditMode ? 'Done editing' : 'Edit plan';
-    toggleBtn.classList.toggle('active', planEditMode);
-    document.getElementById('planAddDay').style.display = planEditMode ? 'block' : 'none';
-
     const wrap = document.getElementById('planDays');
     if(!plan.length){
-      wrap.innerHTML = `<div class="empty-state">No plan yet. Tap "Edit plan" then "+ Add day" to build one.</div>`;
+      wrap.innerHTML = `<div class="empty-state">No routines yet. Tap "+ Add day" to build one.</div>`;
       return;
     }
 
     wrap.innerHTML = plan.map(day=>{
       const open = day.id === expandedPlanDayId;
-      let bodyHtml = '';
-      if(planEditMode){
-        let lastSection = null;
-        bodyHtml += day.exercises.map(ex=>{
-          const showLabel = ex.section && ex.section !== lastSection;
-          lastSection = ex.section;
-          return (showLabel ? `<div class="plan-section-label">${escapeHtml(ex.section)}</div>` : '') + `
-            <div class="plan-ex-row">
-              <div class="plan-ex-edit-fields">
-                <input class="ex-name" data-day="${day.id}" data-ex="${ex.id}" data-field="name" value="${escapeHtml(ex.name)}" placeholder="Exercise name">
-                <input class="ex-target" data-day="${day.id}" data-ex="${ex.id}" data-field="target" value="${escapeHtml(ex.target)}" placeholder="Sets × reps">
-              </div>
-              <button class="plan-ex-del" data-day="${day.id}" data-ex="${ex.id}">✕</button>
-            </div>`;
-        }).join('');
-        bodyHtml += `<button class="plan-add-ex" data-day="${day.id}">+ Add exercise</button>`;
-        bodyHtml += `
-          <div class="plan-day-actions">
-            <button class="plan-del-day" data-day="${day.id}">Delete day</button>
+      let lastSection = null;
+      let bodyHtml = day.exercises.map(ex=>{
+        const showLabel = ex.section && ex.section !== lastSection;
+        lastSection = ex.section;
+        return (showLabel ? `<div class="plan-section-label">${escapeHtml(ex.section)}</div>` : '') + `
+          <div class="plan-ex-row">
+            <div class="plan-ex-edit-fields">
+              <input class="ex-name" data-day="${day.id}" data-ex="${ex.id}" data-field="name" value="${escapeHtml(ex.name)}" placeholder="Exercise name">
+              <input class="ex-target" data-day="${day.id}" data-ex="${ex.id}" data-field="target" value="${escapeHtml(ex.target)}" placeholder="Sets × reps">
+            </div>
+            <button class="plan-ex-del" data-day="${day.id}" data-ex="${ex.id}">✕</button>
           </div>`;
-      }else{
-        let lastSection = null;
-        bodyHtml += day.exercises.map(ex=>{
-          const showLabel = ex.section && ex.section !== lastSection;
-          lastSection = ex.section;
-          return (showLabel ? `<div class="plan-section-label">${escapeHtml(ex.section)}</div>` : '') + `
-            <div class="plan-ex-row">
-              <div><div class="plan-ex-name">${escapeHtml(ex.name)}</div>
-              <div class="plan-ex-target">${escapeHtml(ex.target)}</div></div>
-            </div>`;
-        }).join('');
-        if(!day.exercises.length) bodyHtml += `<div class="empty-state">No exercises in this day yet.</div>`;
-        bodyHtml += `
-          <div class="plan-day-actions">
-            <button class="plan-log-btn" data-day="${day.id}">Log this day →</button>
-          </div>`;
-      }
+      }).join('');
+      bodyHtml += `<button class="plan-add-ex" data-day="${day.id}">+ Add exercise</button>`;
+      bodyHtml += `
+        <div class="plan-day-actions">
+          <button class="plan-del-day" data-day="${day.id}">Delete day</button>
+        </div>`;
 
       return `
         <div class="plan-day ${open?'open':''}">
           <div class="plan-day-head" data-day="${day.id}">
-            ${planEditMode
-              ? `<input class="plan-day-name-input" data-day="${day.id}" data-field="dayname" value="${escapeHtml(day.name)}">`
-              : `<div class="plan-day-title">${escapeHtml(day.name)}</div>`}
+            <input class="plan-day-name-input" data-day="${day.id}" data-field="dayname" value="${escapeHtml(day.name)}">
             <div style="display:flex; align-items:center; gap:10px;">
               <div class="plan-day-count">${day.exercises.length} ex</div>
               <div class="plan-day-chevron">▾</div>
@@ -1046,28 +1175,10 @@
     wrap.querySelectorAll('.plan-del-day').forEach(btn=>{
       btn.addEventListener('click', async (e)=>{
         e.stopPropagation();
-        if(!confirm('Delete this day from your plan?')) return;
+        if(!confirm('Delete this day from your routines?')) return;
         plan = plan.filter(x=>x.id!==btn.dataset.day);
         await setJSON('plan', plan);
         renderPlanTab();
-      });
-    });
-
-    // log day -> today's train log
-    wrap.querySelectorAll('.plan-log-btn').forEach(btn=>{
-      btn.addEventListener('click', async (e)=>{
-        e.stopPropagation();
-        const d = plan.find(x=>x.id===btn.dataset.day);
-        if(!d || !d.exercises.length) return;
-        const key = 'workouts:'+keyFor(now);
-        const list = await getJSON(key, []);
-        d.exercises.forEach(ex=>{
-          list.push({id:uid(), name: ex.name, type: d.name, detail: ex.target});
-        });
-        await setJSON(key, list);
-        toast(d.name+' logged to today — tap any entry to fill in weights');
-        trainViewDate = new Date(now);
-        showTab('train');
       });
     });
   }
