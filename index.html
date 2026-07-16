@@ -288,6 +288,69 @@
   }
   .toast.show{opacity:1; transform:translateX(-50%) translateY(0);}
   ::-webkit-scrollbar{display:none;}
+
+  /* ---------- plan tab ---------- */
+  .plan-toolbar{display:flex; gap:10px; margin-bottom:16px;}
+  .plan-edit-toggle, .plan-add-day{
+    flex:1;
+    background:var(--surface); border:1px solid var(--border); color:var(--text);
+    font-family:'Oswald',sans-serif; font-size:12px; letter-spacing:1px; text-transform:uppercase;
+    padding:12px; border-radius:var(--radius-sm); cursor:pointer;
+  }
+  .plan-edit-toggle.active{background:var(--lime); color:#181600; border-color:var(--lime);}
+  .plan-day{
+    background:var(--surface); border:1px solid var(--border); border-radius:var(--radius);
+    margin-bottom:12px; overflow:hidden;
+  }
+  .plan-day-head{
+    display:flex; align-items:center; justify-content:space-between;
+    padding:15px 16px; cursor:pointer;
+  }
+  .plan-day-title{font-family:'Oswald',sans-serif; font-weight:600; font-size:15px; letter-spacing:0.5px;}
+  .plan-day-count{font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dimmer);}
+  .plan-day-chevron{color:var(--text-dimmer); font-size:13px; transition:transform .2s;}
+  .plan-day.open .plan-day-chevron{transform:rotate(180deg);}
+  .plan-day-body{display:none; padding:0 16px 16px;}
+  .plan-day.open .plan-day-body{display:block;}
+  .plan-day-name-input{
+    font-family:'Oswald',sans-serif; font-weight:600; font-size:15px; background:var(--surface-2);
+    border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 10px; flex:1; margin-right:10px;
+  }
+  .plan-section-label{
+    font-family:'Oswald',sans-serif; font-size:10.5px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--text-dimmer); margin:14px 0 6px;
+  }
+  .plan-section-label:first-child{margin-top:0;}
+  .plan-ex-row{
+    display:flex; align-items:center; justify-content:space-between; gap:10px;
+    padding:9px 0; border-bottom:1px solid var(--border);
+  }
+  .plan-ex-row:last-child{border-bottom:none;}
+  .plan-ex-name{font-size:13.5px; font-weight:500;}
+  .plan-ex-target{font-family:'JetBrains Mono',monospace; font-size:12px; color:var(--text-dim); margin-top:2px;}
+  .plan-ex-edit-fields{display:flex; gap:8px; flex:1;}
+  .plan-ex-edit-fields input{
+    background:var(--surface-2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:9px 10px; font-size:13px; font-family:'Inter',sans-serif;
+  }
+  .plan-ex-edit-fields input.ex-name{flex:1.4;}
+  .plan-ex-edit-fields input.ex-target{flex:1;}
+  .plan-ex-del{background:none; border:none; color:var(--text-dimmer); font-size:17px; cursor:pointer; padding:2px 4px;}
+  .plan-ex-del:active{color:var(--red);}
+  .plan-add-ex{
+    width:100%; margin-top:10px; background:var(--surface-2); border:1px dashed var(--border); color:var(--text-dim);
+    padding:10px; border-radius:10px; font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:1px;
+    text-transform:uppercase; cursor:pointer;
+  }
+  .plan-day-actions{display:flex; gap:8px; margin-top:12px;}
+  .plan-log-btn{
+    flex:1; background:var(--lime); color:#181600; border:none; font-family:'Oswald',sans-serif;
+    font-weight:600; letter-spacing:1px; text-transform:uppercase; font-size:12px; padding:11px; border-radius:10px; cursor:pointer;
+  }
+  .plan-del-day{
+    background:none; border:1px solid var(--red); color:var(--red); border-radius:10px; padding:11px 14px;
+    font-family:'Oswald',sans-serif; font-size:11px; letter-spacing:1px; text-transform:uppercase; cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -357,6 +420,15 @@
       <div class="entry-list" id="trainList"></div>
     </section>
 
+    <!-- PLAN -->
+    <section class="tab" id="tab-plan">
+      <div class="plan-toolbar">
+        <button class="plan-edit-toggle" id="planEditToggle">Edit plan</button>
+        <button class="plan-add-day" id="planAddDay">+ Add day</button>
+      </div>
+      <div id="planDays"></div>
+    </section>
+
     <!-- WEIGHT -->
     <section class="tab" id="tab-weight">
       <div class="chart-wrap">
@@ -384,6 +456,7 @@
     <button class="active" data-tab="today"><span class="ic">◆</span>Today</button>
     <button data-tab="food"><span class="ic">🍽</span>Food</button>
     <button data-tab="train"><span class="ic">🏋</span>Train</button>
+    <button data-tab="plan"><span class="ic">📋</span>Plan</button>
     <button data-tab="weight"><span class="ic">⚖</span>Weight</button>
   </nav>
 
@@ -460,13 +533,16 @@
 
   let settings = { calGoal: 2200, proteinGoal: 150, carbGoal: 220 };
   let weights = []; // {id, date:'YYYY-MM-DD', value}
+  let plan = []; // [{id, name, exercises:[{id, name, target, section}]}]
+  let planEditMode = false;
+  let expandedPlanDayId = null;
 
   /* ---------------- header date ---------------- */
   document.getElementById('headerDate').textContent =
     now.toLocaleDateString(undefined,{weekday:'short', month:'short', day:'numeric'}).toUpperCase();
 
   /* ---------------- tab switching ---------------- */
-  const tabs = ['today','food','train','weight'];
+  const tabs = ['today','food','train','plan','weight'];
   function showTab(name){
     tabs.forEach(t=>{
       document.getElementById('tab-'+t).classList.toggle('active', t===name);
@@ -476,6 +552,7 @@
     });
     if(name==='food') renderFoodTab();
     if(name==='train') renderTrainTab();
+    if(name==='plan') renderPlanTab();
     if(name==='weight') renderWeightTab();
     if(name==='today') renderToday();
   }
@@ -725,10 +802,23 @@
     }
     wrap.innerHTML = list.slice().reverse().map(w=>`
       <div class="entry">
-        <div><div class="name">${escapeHtml(w.name)}</div>
-        <div class="sub">${escapeHtml(w.type)} · ${escapeHtml(w.detail||'—')}</div></div>
+        <div class="entry-edit-target" data-id="${w.id}"><div class="name">${escapeHtml(w.name)}</div>
+        <div class="sub">${escapeHtml(w.type)} · ${escapeHtml(w.detail||'tap to add weight/reps')}</div></div>
         <button class="del" data-id="${w.id}">✕</button>
       </div>`).join('');
+    wrap.querySelectorAll('.entry-edit-target').forEach(el=>{
+      el.style.cursor = 'pointer';
+      el.addEventListener('click', async ()=>{
+        const l = await getJSON(key, []);
+        const item = l.find(x=>x.id===el.dataset.id);
+        if(!item) return;
+        const val = prompt('Sets/reps/weight for "'+item.name+'"', item.detail||'');
+        if(val === null) return;
+        item.detail = val.trim();
+        await setJSON(key, l);
+        renderTrainTab();
+      });
+    });
     wrap.querySelectorAll('.del').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
         const l = await getJSON(key, []);
@@ -738,6 +828,250 @@
       });
     });
   }
+
+  /* ---------------- plan tab ---------------- */
+  function defaultPlan(){
+    const sec = (section, name, target) => ({id:uid(), section, name, target});
+    return [
+      {
+        id: uid(), name: 'Push (Wed)',
+        exercises: [
+          sec('Warm-up','Incline Treadmill Walk','5 min'),
+          sec('Warm-up','Band Pull-Aparts','2 × 20'),
+          sec('Warm-up','Shoulder External Rotations','2 × 15'),
+          sec('Main','Bench Press (Smith/Barbell)','4 × 6–8'),
+          sec('Main','Incline Dumbbell Press','3 × 8–10'),
+          sec('Main','High-to-Low Cable Press/Fly (Decline Alt.)','3 × 10–12'),
+          sec('Main','Seated Shoulder Press','3 × 8–10'),
+          sec('Main','Cable Lateral Raise','3 × 12–15'),
+          sec('Main','Rope Triceps Pushdown','3 × 10–12'),
+          sec('Main','Overhead DB Triceps Extension (or EZ-Bar Skull Crusher)','3 × 10–12'),
+          sec('Posture','Face Pull','2 × 15'),
+          sec('Posture','Chin Tucks','2 × 15'),
+          sec('Core','Dead Bug','2 × 12'),
+        ]
+      },
+      {
+        id: uid(), name: 'Pull (Thu)',
+        exercises: [
+          sec('Warm-up','Rowing Machine','5 min'),
+          sec('Warm-up','Band Rows','2 × 20'),
+          sec('Main','Lat Pulldown','4 × 8–10'),
+          sec('Main','Chest Supported Row','3 × 8–10'),
+          sec('Main','Single-Arm Dumbbell Row','3 × 10/side'),
+          sec('Main','Reverse Pec Deck','3 × 12–15'),
+          sec('Main','Hammer Curl','3 × 10–12'),
+          sec('Main','Barbell Curl (or EZ-Bar Curl)','3 × 8–10'),
+          sec('Main','Concentration Curl','2 × 12/arm'),
+          sec('Posture','Face Pull','2 × 15'),
+          sec('Posture','Wall Slides','2 × 15'),
+          sec('Core','Hanging Knee Raise','2 × 12'),
+          sec('Core','Side Plank','2 × 30–45 sec'),
+        ]
+      },
+      {
+        id: uid(), name: 'Legs (Fri)',
+        exercises: [
+          sec('Warm-up','Incline Walk','5 min'),
+          sec('Warm-up','Bodyweight Squats','2 × 15'),
+          sec('Warm-up','Glute Bridges','2 × 15'),
+          sec('Warm-up','Hip Flexor Stretch','30 sec/side'),
+          sec('Main','Hack Squat / Smith Squat','4 × 6–8'),
+          sec('Main','Romanian Deadlift','3 × 8–10'),
+          sec('Main','Leg Press','3 × 10–12'),
+          sec('Main','Leg Curl','3 × 10–12'),
+          sec('Main','Leg Extension','2 × 12–15'),
+          sec('Main','Standing Calf Raise','4 × 15–20'),
+          sec('Posture','Couch Stretch','2 × 30 sec/side'),
+          sec('Posture','Cat-Cow Stretch','2 × 10'),
+          sec('Core','Plank','3 × 45–60 sec'),
+        ]
+      },
+      {
+        id: uid(), name: 'Upper Hypertrophy + Arms (Sat)',
+        exercises: [
+          sec('Warm-up','Rowing Machine','5 min'),
+          sec('Warm-up','Band Pull-Aparts','2 × 20'),
+          sec('Main','Incline Machine Press','3 × 10–12'),
+          sec('Main','Neutral Grip Lat Pulldown','3 × 10–12'),
+          sec('Main','Machine Shoulder Press','3 × 10–12'),
+          sec('Main','Cable Lateral Raise','3 × 15'),
+          sec('Main','Incline Bench Curl','3 × 10–12'),
+          sec('Main','Overhead Rope Triceps Extension','3 × 10–12'),
+          sec('Posture','Face Pull','3 × 15'),
+          sec('Posture','Wall Slides','2 × 15'),
+          sec('Posture','Chin Tucks','2 × 15'),
+          sec('Core','Hanging Knee Raise','2 × 12'),
+        ]
+      },
+    ];
+  }
+
+  document.getElementById('planEditToggle').addEventListener('click', ()=>{
+    planEditMode = !planEditMode;
+    renderPlanTab();
+  });
+  document.getElementById('planAddDay').addEventListener('click', async ()=>{
+    plan.push({id:uid(), name:'New Day', exercises:[]});
+    expandedPlanDayId = plan[plan.length-1].id;
+    planEditMode = true;
+    await setJSON('plan', plan);
+    renderPlanTab();
+  });
+
+  function renderPlanTab(){
+    const toggleBtn = document.getElementById('planEditToggle');
+    toggleBtn.textContent = planEditMode ? 'Done editing' : 'Edit plan';
+    toggleBtn.classList.toggle('active', planEditMode);
+    document.getElementById('planAddDay').style.display = planEditMode ? 'block' : 'none';
+
+    const wrap = document.getElementById('planDays');
+    if(!plan.length){
+      wrap.innerHTML = `<div class="empty-state">No plan yet. Tap "Edit plan" then "+ Add day" to build one.</div>`;
+      return;
+    }
+
+    wrap.innerHTML = plan.map(day=>{
+      const open = day.id === expandedPlanDayId;
+      let bodyHtml = '';
+      if(planEditMode){
+        let lastSection = null;
+        bodyHtml += day.exercises.map(ex=>{
+          const showLabel = ex.section && ex.section !== lastSection;
+          lastSection = ex.section;
+          return (showLabel ? `<div class="plan-section-label">${escapeHtml(ex.section)}</div>` : '') + `
+            <div class="plan-ex-row">
+              <div class="plan-ex-edit-fields">
+                <input class="ex-name" data-day="${day.id}" data-ex="${ex.id}" data-field="name" value="${escapeHtml(ex.name)}" placeholder="Exercise name">
+                <input class="ex-target" data-day="${day.id}" data-ex="${ex.id}" data-field="target" value="${escapeHtml(ex.target)}" placeholder="Sets × reps">
+              </div>
+              <button class="plan-ex-del" data-day="${day.id}" data-ex="${ex.id}">✕</button>
+            </div>`;
+        }).join('');
+        bodyHtml += `<button class="plan-add-ex" data-day="${day.id}">+ Add exercise</button>`;
+        bodyHtml += `
+          <div class="plan-day-actions">
+            <button class="plan-del-day" data-day="${day.id}">Delete day</button>
+          </div>`;
+      }else{
+        let lastSection = null;
+        bodyHtml += day.exercises.map(ex=>{
+          const showLabel = ex.section && ex.section !== lastSection;
+          lastSection = ex.section;
+          return (showLabel ? `<div class="plan-section-label">${escapeHtml(ex.section)}</div>` : '') + `
+            <div class="plan-ex-row">
+              <div><div class="plan-ex-name">${escapeHtml(ex.name)}</div>
+              <div class="plan-ex-target">${escapeHtml(ex.target)}</div></div>
+            </div>`;
+        }).join('');
+        if(!day.exercises.length) bodyHtml += `<div class="empty-state">No exercises in this day yet.</div>`;
+        bodyHtml += `
+          <div class="plan-day-actions">
+            <button class="plan-log-btn" data-day="${day.id}">Log this day →</button>
+          </div>`;
+      }
+
+      return `
+        <div class="plan-day ${open?'open':''}">
+          <div class="plan-day-head" data-day="${day.id}">
+            ${planEditMode
+              ? `<input class="plan-day-name-input" data-day="${day.id}" data-field="dayname" value="${escapeHtml(day.name)}">`
+              : `<div class="plan-day-title">${escapeHtml(day.name)}</div>`}
+            <div style="display:flex; align-items:center; gap:10px;">
+              <div class="plan-day-count">${day.exercises.length} ex</div>
+              <div class="plan-day-chevron">▾</div>
+            </div>
+          </div>
+          <div class="plan-day-body">${bodyHtml}</div>
+        </div>`;
+    }).join('');
+
+    // expand/collapse
+    wrap.querySelectorAll('.plan-day-head').forEach(head=>{
+      head.addEventListener('click', (e)=>{
+        if(e.target.tagName==='INPUT') return;
+        const id = head.dataset.day;
+        expandedPlanDayId = (expandedPlanDayId === id) ? null : id;
+        renderPlanTab();
+      });
+    });
+
+    // day name edit
+    wrap.querySelectorAll('input[data-field="dayname"]').forEach(inp=>{
+      inp.addEventListener('click', e=>e.stopPropagation());
+      inp.addEventListener('change', async ()=>{
+        const d = plan.find(x=>x.id===inp.dataset.day);
+        if(d){ d.name = inp.value.trim() || 'Untitled day'; await setJSON('plan', plan); }
+      });
+    });
+
+    // exercise field edit
+    wrap.querySelectorAll('input[data-ex]').forEach(inp=>{
+      inp.addEventListener('change', async ()=>{
+        const d = plan.find(x=>x.id===inp.dataset.day);
+        if(!d) return;
+        const ex = d.exercises.find(x=>x.id===inp.dataset.ex);
+        if(!ex) return;
+        if(inp.dataset.field==='name') ex.name = inp.value.trim() || 'Exercise';
+        if(inp.dataset.field==='target') ex.target = inp.value.trim();
+        await setJSON('plan', plan);
+      });
+    });
+
+    // delete exercise
+    wrap.querySelectorAll('.plan-ex-del').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        const d = plan.find(x=>x.id===btn.dataset.day);
+        if(!d) return;
+        d.exercises = d.exercises.filter(x=>x.id!==btn.dataset.ex);
+        await setJSON('plan', plan);
+        renderPlanTab();
+      });
+    });
+
+    // add exercise
+    wrap.querySelectorAll('.plan-add-ex').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        const d = plan.find(x=>x.id===btn.dataset.day);
+        if(!d) return;
+        d.exercises.push({id:uid(), section:'', name:'', target:''});
+        await setJSON('plan', plan);
+        renderPlanTab();
+      });
+    });
+
+    // delete day
+    wrap.querySelectorAll('.plan-del-day').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        if(!confirm('Delete this day from your plan?')) return;
+        plan = plan.filter(x=>x.id!==btn.dataset.day);
+        await setJSON('plan', plan);
+        renderPlanTab();
+      });
+    });
+
+    // log day -> today's train log
+    wrap.querySelectorAll('.plan-log-btn').forEach(btn=>{
+      btn.addEventListener('click', async (e)=>{
+        e.stopPropagation();
+        const d = plan.find(x=>x.id===btn.dataset.day);
+        if(!d || !d.exercises.length) return;
+        const key = 'workouts:'+keyFor(now);
+        const list = await getJSON(key, []);
+        d.exercises.forEach(ex=>{
+          list.push({id:uid(), name: ex.name, type: d.name, detail: ex.target});
+        });
+        await setJSON(key, list);
+        toast(d.name+' logged to today — tap any entry to fill in weights');
+        trainViewDate = new Date(now);
+        showTab('train');
+      });
+    });
+  }
+
 
   /* ---------------- weight tab ---------------- */
   const weightForm = document.getElementById('weightForm');
@@ -827,6 +1161,13 @@
   async function boot(){
     settings = await getJSON('settings', settings);
     weights = await getJSON('weights', []);
+    const storedPlan = await getJSON('plan', null);
+    if(storedPlan === null){
+      plan = defaultPlan();
+      await setJSON('plan', plan);
+    }else{
+      plan = storedPlan;
+    }
     await renderToday();
   }
   boot();
