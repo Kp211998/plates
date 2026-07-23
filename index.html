@@ -946,37 +946,114 @@
     a.remove();
     URL.revokeObjectURL(url);
   }
-  function flattenValue(value){
-    if(Array.isArray(value)) return value.map(item=>JSON.stringify(item)).join('\n');
-    if(value && typeof value === 'object') return JSON.stringify(value, null, 2);
-    return value === null || value === undefined ? '' : String(value);
-  }
-  function exportRows(){
-    return listSyncedKeys().sort().map(key=>({
-      key,
-      value: flattenValue(getLocalOnlyJSON(key, null))
-    }));
-  }
   function htmlEscape(s){
     return String(s || '').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
+  function readableDate(dateKey){
+    const d = new Date(dateKey+'T00:00:00');
+    return isNaN(d) ? dateKey : d.toLocaleDateString(undefined,{year:'numeric', month:'short', day:'numeric'});
+  }
+  function exportSections(){
+    const keys = listSyncedKeys();
+    const foodRows = [];
+    const workoutRows = [];
+    keys.forEach(key=>{
+      if(key.indexOf('food:')===0){
+        const date = key.slice(5);
+        const list = getLocalOnlyJSON(key, []);
+        (list || []).forEach(item=>foodRows.push({
+          dateSort: date,
+          Date: readableDate(date),
+          Food: item.name || '',
+          Calories: item.cal || 0,
+          'Protein (g)': item.protein || 0,
+          'Carbs (g)': item.carb || 0
+        }));
+      }
+      if(key.indexOf('workouts:')===0){
+        const date = key.slice(9);
+        const list = getLocalOnlyJSON(key, []);
+        (list || []).forEach(item=>{
+          if(item.sets && item.sets.length){
+            item.sets.forEach((set, idx)=>workoutRows.push({
+              dateSort: date,
+              Date: readableDate(date),
+              Type: item.type || '',
+              Section: item.section || '',
+              Exercise: item.name || '',
+              Target: item.target || '',
+              Set: idx + 1,
+              Weight: set.weight || '',
+              Reps: set.reps || '',
+              Done: item.done ? 'Yes' : 'No',
+              Notes: item.detail || ''
+            }));
+          }else{
+            workoutRows.push({
+              dateSort: date,
+              Date: readableDate(date),
+              Type: item.type || '',
+              Section: item.section || '',
+              Exercise: item.name || '',
+              Target: item.target || '',
+              Set: '',
+              Weight: '',
+              Reps: '',
+              Done: item.done ? 'Yes' : 'No',
+              Notes: item.detail || ''
+            });
+          }
+        });
+      }
+    });
+    foodRows.sort((a,b)=>a.dateSort.localeCompare(b.dateSort)).forEach(row=>delete row.dateSort);
+    workoutRows.sort((a,b)=>a.dateSort.localeCompare(b.dateSort)).forEach(row=>delete row.dateSort);
+    const metricRows = []
+      .concat((getLocalOnlyJSON('weights', []) || []).map(item=>({Date:readableDate(item.date), Metric:'Weight', Value:item.value, Unit:'kg'})))
+      .concat((getLocalOnlyJSON('waist', []) || []).map(item=>({Date:readableDate(item.date), Metric:'Waist', Value:item.value, Unit:'cm'})));
+    const goalRows = [
+      {Goal:'Calories', Value:settings.calGoal, Unit:'kcal'},
+      {Goal:'Protein', Value:settings.proteinGoal, Unit:'g'},
+      {Goal:'Carbs', Value:settings.carbGoal, Unit:'g'}
+    ];
+    const routineRows = (getLocalOnlyJSON('plan', plan) || []).flatMap(day=>
+      (day.exercises || []).map((ex, idx)=>({
+        Day: day.name || '',
+        Order: idx + 1,
+        Section: ex.section || '',
+        Exercise: ex.name || '',
+        Target: ex.target || ''
+      }))
+    );
+    return [
+      {title:'Food Log', rows:foodRows},
+      {title:'Workout Log', rows:workoutRows},
+      {title:'Body Stats', rows:metricRows},
+      {title:'Daily Goals', rows:goalRows},
+      {title:'Routines', rows:routineRows}
+    ];
+  }
+  function tableHtml(section){
+    const cols = section.rows.length ? Object.keys(section.rows[0]) : ['No data'];
+    const body = section.rows.length
+      ? section.rows.map(row=>`<tr>${cols.map(col=>`<td>${htmlEscape(row[col])}</td>`).join('')}</tr>`).join('')
+      : '<tr><td>No data logged yet</td></tr>';
+    return `<h2>${htmlEscape(section.title)}</h2><table border="1"><thead><tr>${cols.map(col=>`<th>${htmlEscape(col)}</th>`).join('')}</tr></thead><tbody>${body}</tbody></table>`;
+  }
   function exportExcel(){
-    const rows = exportRows();
-    const body = rows.map(row=>`<tr><td>${htmlEscape(row.key)}</td><td style="white-space:pre-wrap">${htmlEscape(row.value)}</td></tr>`).join('');
-    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><table border="1"><thead><tr><th>Data key</th><th>Value</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>h2{font-family:Arial,sans-serif; margin-top:22px;} table{border-collapse:collapse; margin-bottom:18px;} th,td{padding:8px; border:1px solid #999;} th{background:#eee;}</style></head><body><h1>Plates export</h1>${exportSections().map(tableHtml).join('')}</body></html>`;
     downloadFile('plates-export-'+keyFor(new Date())+'.xls', 'application/vnd.ms-excel;charset=utf-8', html);
     toast('Excel export ready');
   }
   function exportPdf(){
-    const rows = exportRows();
     const win = window.open('', '_blank');
     if(!win){ toast('Allow popups for PDF export'); return; }
     win.document.write(`<!DOCTYPE html><html><head><title>Plates export</title><style>
       body{font-family:Arial,sans-serif; color:#111; padding:24px;}
-      h1{font-size:22px; margin:0 0 4px;} .meta{color:#555; margin-bottom:18px;}
+      h1{font-size:22px; margin:0 0 4px;} h2{font-size:16px; margin:22px 0 8px;} .meta{color:#555; margin-bottom:18px;}
       table{width:100%; border-collapse:collapse; font-size:11px;} th,td{border:1px solid #ccc; padding:8px; vertical-align:top;}
-      th{background:#eee; text-align:left;} td:first-child{width:170px; font-weight:bold;} pre{white-space:pre-wrap; margin:0; font-family:Consolas,monospace;}
-    </style></head><body><h1>Plates export</h1><div class="meta">${new Date().toLocaleString()}</div><table><thead><tr><th>Data key</th><th>Value</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${htmlEscape(row.key)}</td><td><pre>${htmlEscape(row.value)}</pre></td></tr>`).join('')}</tbody></table><script>window.onload=function(){window.print();};<\/script></body></html>`);
+      th{background:#eee; text-align:left;} table{page-break-inside:auto;} tr{page-break-inside:avoid;}
+    </style></head><body><h1>Plates export</h1><div class="meta">${new Date().toLocaleString()}</div>${exportSections().map(tableHtml).join('')}<script>window.onload=function(){window.print();};<\/script></body></html>`);
     win.document.close();
     closeSheet();
   }
