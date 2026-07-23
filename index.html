@@ -233,6 +233,13 @@
   .chart-head{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:6px;}
   .chart-head .big{font-family:'JetBrains Mono',monospace; font-size:26px; font-weight:700;}
   .chart-head .delta{font-family:'JetBrains Mono',monospace; font-size:12px;}
+  .metric-switch{display:flex; gap:8px; margin-bottom:14px;}
+  .metric-switch button{
+    flex:1; background:var(--surface); border:1px solid var(--border); color:var(--text-dim);
+    border-radius:var(--radius-sm); padding:11px; font-family:'Oswald',sans-serif;
+    font-size:12px; letter-spacing:1px; text-transform:uppercase; cursor:pointer;
+  }
+  .metric-switch button.active{background:var(--lime); border-color:var(--lime); color:#181600;}
   .delta.pos{color:var(--red);}
   .delta.neg{color:var(--lime);}
   .delta.flat{color:var(--text-dim);}
@@ -280,6 +287,8 @@
     padding:12px; border-radius:10px; font-family:'Oswald',sans-serif; letter-spacing:1px; text-transform:uppercase;
     font-size:12px; margin-top:18px; cursor:pointer;
   }
+  .export-row{display:flex; gap:10px; margin-top:8px;}
+  .export-row .submit-btn{flex:1; margin-top:0;}
   .toast{
     position:fixed; bottom:100px; left:50%; transform:translateX(-50%) translateY(20px);
     background:var(--lime); color:#181600; font-family:'Oswald',sans-serif; font-weight:600; letter-spacing:0.5px;
@@ -432,7 +441,7 @@
       <div class="quick-actions">
         <div class="qa-btn" data-goto="food"><span class="ic">🍽</span>Log food</div>
         <div class="qa-btn" data-goto="train"><span class="ic">🏋</span>Log workout</div>
-        <div class="qa-btn" data-goto="weight"><span class="ic">⚖</span>Log weight</div>
+        <div class="qa-btn" data-goto="weight"><span class="ic">📏</span>Body stats</div>
       </div>
 
       <h2 class="section-title">This week</h2>
@@ -488,11 +497,15 @@
 
     <!-- WEIGHT -->
     <section class="tab" id="tab-weight">
+      <div class="metric-switch" id="metricSwitch">
+        <button type="button" class="active" data-metric="weight">Weight</button>
+        <button type="button" data-metric="waist">Waist</button>
+      </div>
       <div class="chart-wrap">
         <div class="chart-head">
           <div>
             <div class="big" id="weightCurrent">—</div>
-            <div style="font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--text-dimmer); margin-top:2px;">current</div>
+            <div id="metricCurrentLabel" style="font-size:10px; letter-spacing:1px; text-transform:uppercase; color:var(--text-dimmer); margin-top:2px;">current kg</div>
           </div>
           <div class="delta" id="weightDelta">—</div>
         </div>
@@ -500,7 +513,7 @@
       </div>
       <button class="form-toggle" id="weightFormToggle">+ Log weight</button>
       <div class="add-form" id="weightForm">
-        <label>Weight (kg)</label>
+        <label id="metricFormLabel">Weight (kg)</label>
         <input type="number" inputmode="decimal" step="0.1" id="weightVal" placeholder="0.0">
         <button class="submit-btn" id="weightSubmit">Save entry</button>
       </div>
@@ -539,6 +552,11 @@
       <button class="submit-btn" id="syncSave">Save sync settings</button>
       <button class="submit-btn" id="syncNow" style="background:var(--surface-2); color:var(--text); border:1px solid var(--border);">Sync now</button>
       <div class="sub" id="syncStatus" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text-dim); margin-top:2px;"></div>
+      <h3 style="margin-top:18px;">Export data</h3>
+      <div class="export-row">
+        <button class="submit-btn" id="exportExcel" style="background:var(--surface-2); color:var(--text); border:1px solid var(--border);">Excel</button>
+        <button class="submit-btn" id="exportPdf" style="background:var(--surface-2); color:var(--text); border:1px solid var(--border);">PDF</button>
+      </div>
       <button class="danger-btn" id="resetAll">Erase all data</button>
     </div>
   </div>
@@ -785,6 +803,11 @@
     if(!filled.length) return '';
     return sets.map(s=> (s.weight||'-')+'×'+(s.reps||'-')).join(', ');
   }
+  function metricConfig(){
+    return activeMetric === 'waist'
+      ? { key:'waist', list:waist, label:'Waist', unit:'cm', empty:'No waist size logged yet.' }
+      : { key:'weights', list:weights, label:'Weight', unit:'kg', empty:'No weight logged yet.' };
+  }
   function sessionTimes(list){
     const stamps = [];
     (list||[]).forEach(item=>{
@@ -813,6 +836,8 @@
 
   let settings = { calGoal: 2200, proteinGoal: 150, carbGoal: 220 };
   let weights = []; // {id, date:'YYYY-MM-DD', value}
+  let waist = []; // {id, date:'YYYY-MM-DD', value}
+  let activeMetric = 'weight';
   let plan = []; // [{id, name, exercises:[{id, name, target, section}]}]
   let expandedPlanDayId = null;
   let forceRoutinePickerForDate = null;
@@ -910,8 +935,55 @@
     await syncNow();
   });
   document.getElementById('syncNow').addEventListener('click', ()=>syncNow());
+  function downloadFile(filename, type, content){
+    const blob = new Blob([content], {type});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+  function flattenValue(value){
+    if(Array.isArray(value)) return value.map(item=>JSON.stringify(item)).join('\n');
+    if(value && typeof value === 'object') return JSON.stringify(value, null, 2);
+    return value === null || value === undefined ? '' : String(value);
+  }
+  function exportRows(){
+    return listSyncedKeys().sort().map(key=>({
+      key,
+      value: flattenValue(getLocalOnlyJSON(key, null))
+    }));
+  }
+  function htmlEscape(s){
+    return String(s || '').replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  }
+  function exportExcel(){
+    const rows = exportRows();
+    const body = rows.map(row=>`<tr><td>${htmlEscape(row.key)}</td><td style="white-space:pre-wrap">${htmlEscape(row.value)}</td></tr>`).join('');
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8"></head><body><table border="1"><thead><tr><th>Data key</th><th>Value</th></tr></thead><tbody>${body}</tbody></table></body></html>`;
+    downloadFile('plates-export-'+keyFor(new Date())+'.xls', 'application/vnd.ms-excel;charset=utf-8', html);
+    toast('Excel export ready');
+  }
+  function exportPdf(){
+    const rows = exportRows();
+    const win = window.open('', '_blank');
+    if(!win){ toast('Allow popups for PDF export'); return; }
+    win.document.write(`<!DOCTYPE html><html><head><title>Plates export</title><style>
+      body{font-family:Arial,sans-serif; color:#111; padding:24px;}
+      h1{font-size:22px; margin:0 0 4px;} .meta{color:#555; margin-bottom:18px;}
+      table{width:100%; border-collapse:collapse; font-size:11px;} th,td{border:1px solid #ccc; padding:8px; vertical-align:top;}
+      th{background:#eee; text-align:left;} td:first-child{width:170px; font-weight:bold;} pre{white-space:pre-wrap; margin:0; font-family:Consolas,monospace;}
+    </style></head><body><h1>Plates export</h1><div class="meta">${new Date().toLocaleString()}</div><table><thead><tr><th>Data key</th><th>Value</th></tr></thead><tbody>${rows.map(row=>`<tr><td>${htmlEscape(row.key)}</td><td><pre>${htmlEscape(row.value)}</pre></td></tr>`).join('')}</tbody></table><script>window.onload=function(){window.print();};<\/script></body></html>`);
+    win.document.close();
+    closeSheet();
+  }
+  document.getElementById('exportExcel').addEventListener('click', exportExcel);
+  document.getElementById('exportPdf').addEventListener('click', exportPdf);
   document.getElementById('resetAll').addEventListener('click', async ()=>{
-    if(!confirm('This clears all logged food, workouts, weight and goals on this device. Continue?')) return;
+    if(!confirm('This clears all logged food, workouts, body stats and goals on this device. Continue?')) return;
     try{ await clearCloudData(); }catch(e){ console.warn('cloud reset failed', e); }
     try{
       const toRemove = [];
@@ -923,6 +995,7 @@
     }catch(e){ console.error(e); }
     settings = { calGoal: 2200, proteinGoal: 150, carbGoal: 220 };
     weights = [];
+    waist = [];
     plan = defaultPlan();
     await setJSON('plan', plan);
     closeSheet(); toast('All data erased');
@@ -997,7 +1070,7 @@
     document.getElementById('weekStrip').innerHTML = `
       <div class="stat-box"><div class="n">${weekWorkouts}</div><div class="l">Sessions</div></div>
       <div class="stat-box"><div class="n">${avgCal}</div><div class="l">Avg kcal</div></div>
-      <div class="stat-box"><div class="n">${weights.length? weights[weights.length-1].value : '—'}</div><div class="l">Weight kg</div></div>
+      <div class="stat-box"><div class="n">${weights.length? Number(weights[weights.length-1].value).toFixed(1) : '—'}</div><div class="l">Weight kg</div></div>
     `;
 
     const prevWrap = document.getElementById('todayWorkoutsPreview');
@@ -1576,26 +1649,42 @@
 
   /* ---------------- weight tab ---------------- */
   const weightForm = document.getElementById('weightForm');
+  document.querySelectorAll('#metricSwitch button').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      activeMetric = btn.dataset.metric;
+      document.querySelectorAll('#metricSwitch button').forEach(b=>b.classList.toggle('active', b.dataset.metric===activeMetric));
+      weightForm.classList.remove('open');
+      document.getElementById('weightVal').value='';
+      renderWeightTab();
+    });
+  });
   document.getElementById('weightFormToggle').addEventListener('click', ()=>{
     weightForm.classList.toggle('open');
   });
   document.getElementById('weightSubmit').addEventListener('click', async ()=>{
+    const config = metricConfig();
     const val = parseFloat(document.getElementById('weightVal').value);
-    if(!val || val<=0){ toast('Enter a valid weight'); return; }
+    if(!val || val<=0){ toast('Enter a valid '+config.label.toLowerCase()); return; }
     const k = keyFor(now);
-    weights = weights.filter(w=>w.date!==k);
-    weights.push({id:uid(), date:k, value:val});
-    weights.sort((a,b)=>a.date.localeCompare(b.date));
-    await setJSON('weights', weights);
+    const next = config.list.filter(w=>w.date!==k);
+    next.push({id:uid(), date:k, value:val});
+    next.sort((a,b)=>a.date.localeCompare(b.date));
+    if(activeMetric === 'waist'){
+      waist = next;
+    }else{
+      weights = next;
+    }
+    await setJSON(config.key, next);
     document.getElementById('weightVal').value='';
     weightForm.classList.remove('open');
-    toast('Weight saved');
+    toast(config.label+' saved');
     renderWeightTab();
     renderToday();
   });
   function renderWeightChart(){
+    const config = metricConfig();
     const svg = document.getElementById('weightChart');
-    const data = weights.slice(-14);
+    const data = config.list.slice(-14);
     if(data.length<2){
       svg.innerHTML = `<text x="160" y="58" text-anchor="middle" fill="var(--text-dimmer)" font-family="JetBrains Mono" font-size="11">Log at least 2 entries to see a trend</text>`;
       return;
@@ -1615,43 +1704,52 @@
     svg.innerHTML = `
       <defs>
         <linearGradient id="wgrad" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stop-color="var(--lime)" stop-opacity="0.35"/>
-          <stop offset="100%" stop-color="var(--lime)" stop-opacity="0"/>
+          <stop offset="0%" stop-color="${activeMetric === 'waist' ? 'var(--blue)' : 'var(--lime)'}" stop-opacity="0.35"/>
+          <stop offset="100%" stop-color="${activeMetric === 'waist' ? 'var(--blue)' : 'var(--lime)'}" stop-opacity="0"/>
         </linearGradient>
       </defs>
       <path d="${area}" fill="url(#wgrad)" stroke="none"/>
-      <path d="${path}" fill="none" stroke="var(--lime)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-      ${pts.map((p,i)=> i===pts.length-1 ? `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="var(--lime)"/>` : `<circle cx="${p[0]}" cy="${p[1]}" r="2" fill="var(--text-dimmer)"/>`).join('')}
+      <path d="${path}" fill="none" stroke="${activeMetric === 'waist' ? 'var(--blue)' : 'var(--lime)'}" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      ${pts.map((p,i)=> i===pts.length-1 ? `<circle cx="${p[0]}" cy="${p[1]}" r="4" fill="${activeMetric === 'waist' ? 'var(--blue)' : 'var(--lime)'}"/>` : `<circle cx="${p[0]}" cy="${p[1]}" r="2" fill="var(--text-dimmer)"/>`).join('')}
     `;
   }
   function renderWeightTab(){
-    const current = weights.length? weights[weights.length-1].value : null;
+    const config = metricConfig();
+    document.getElementById('weightFormToggle').textContent = '+ Log '+config.label.toLowerCase();
+    document.getElementById('metricFormLabel').textContent = config.label+' ('+config.unit+')';
+    document.getElementById('metricCurrentLabel').textContent = 'current '+config.unit;
+    const current = config.list.length? config.list[config.list.length-1].value : null;
     document.getElementById('weightCurrent').textContent = current!==null ? current.toFixed(1) : '—';
     const deltaEl = document.getElementById('weightDelta');
-    if(weights.length>=2){
-      const prev = weights[weights.length-2].value;
+    if(config.list.length>=2){
+      const prev = config.list[config.list.length-2].value;
       const d = (current-prev);
-      deltaEl.textContent = (d>0?'+':'')+d.toFixed(1)+' kg';
+      deltaEl.textContent = (d>0?'+':'')+d.toFixed(1)+' '+config.unit;
       deltaEl.className = 'delta ' + (d>0?'pos':d<0?'neg':'flat');
     }else{
       deltaEl.textContent = '';
     }
     renderWeightChart();
     const wrap = document.getElementById('weightList');
-    if(!weights.length){
-      wrap.innerHTML = `<div class="empty-state">No weight logged yet.</div>`;
+    if(!config.list.length){
+      wrap.innerHTML = `<div class="empty-state">${config.empty}</div>`;
       return;
     }
-    wrap.innerHTML = weights.slice().reverse().map(w=>`
+    wrap.innerHTML = config.list.slice().reverse().map(w=>`
       <div class="entry">
-        <div><div class="name">${w.value.toFixed(1)} kg</div>
+        <div><div class="name">${w.value.toFixed(1)} ${config.unit}</div>
         <div class="sub">${fmtLabel(new Date(w.date+'T00:00:00'), now)}</div></div>
         <button class="del" data-id="${w.id}">✕</button>
       </div>`).join('');
     wrap.querySelectorAll('.del').forEach(btn=>{
       btn.addEventListener('click', async ()=>{
-        weights = weights.filter(w=>w.id!==btn.dataset.id);
-        await setJSON('weights', weights);
+        if(activeMetric === 'waist'){
+          waist = waist.filter(w=>w.id!==btn.dataset.id);
+          await setJSON('waist', waist);
+        }else{
+          weights = weights.filter(w=>w.id!==btn.dataset.id);
+          await setJSON('weights', weights);
+        }
         renderWeightTab();
         renderToday();
       });
@@ -1662,6 +1760,7 @@
   async function reloadStateFromStorage(){
     settings = await getJSON('settings', settings);
     weights = await getJSON('weights', []);
+    waist = await getJSON('waist', []);
     const storedPlan = await getJSON('plan', null);
     plan = storedPlan === null ? defaultPlan() : storedPlan;
     const activeBtn = document.querySelector('.tabbar button.active');
@@ -1723,6 +1822,7 @@
     await syncNow({silent:true});
     settings = await getJSON('settings', settings);
     weights = await getJSON('weights', []);
+    waist = await getJSON('waist', []);
     const storedPlan = await getJSON('plan', null);
     if(storedPlan === null){
       plan = defaultPlan();
