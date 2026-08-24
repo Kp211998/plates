@@ -1518,77 +1518,81 @@
 
   /* ---------------- plan tab ---------------- */
   function defaultPlan(){
-    const sec = (section, name, target) => ({id:uid(), section, name, target});
+    const sec = (section, name, target, rest) => ({
+      id:uid(),
+      section,
+      name,
+      target: rest ? target+' · Rest '+rest : target
+    });
     return [
       {
-        id: uid(), name: 'Push (Wed)',
+        id: uid(), name: 'Wednesday - Push',
         exercises: [
-          sec('Warm-up','Incline Treadmill Walk','5 min'),
-          sec('Warm-up','Band Pull-Aparts','2 × 20'),
-          sec('Warm-up','Shoulder External Rotations','2 × 15'),
-          sec('Main','Bench Press (Smith/Barbell)','4 × 6–8'),
-          sec('Main','Incline Dumbbell Press','3 × 8–10'),
-          sec('Main','High-to-Low Cable Press/Fly (Decline Alt.)','3 × 10–12'),
-          sec('Main','Seated Shoulder Press','3 × 8–10'),
-          sec('Main','Cable Lateral Raise','3 × 12–15'),
-          sec('Main','Rope Triceps Pushdown','3 × 10–12'),
-          sec('Main','Overhead DB Triceps Extension (or EZ-Bar Skull Crusher)','3 × 10–12'),
-          sec('Posture','Face Pull','2 × 15'),
-          sec('Posture','Chin Tucks','2 × 15'),
-          sec('Core','Dead Bug','2 × 12'),
+          sec('Warm-up','Incline Treadmill Walk','5 min','-'),
+          sec('Warm-up','Band Pull-Aparts','2 × 15–20','30 sec'),
+          sec('Warm-up','Shoulder External Rotation','2 × 12–15','30 sec'),
+          sec('Main','Smith/Barbell Bench Press','3 × 6–8','2–3 min'),
+          sec('Main','Incline Dumbbell Press','3 × 8–10','90–120 sec'),
+          sec('Main','High-to-Low Cable Press/Fly','2 × 10–15','60–90 sec'),
+          sec('Main','Seated Shoulder Press','3 × 8–10','90–120 sec'),
+          sec('Main','Cable Lateral Raise','3 × 12–15','60 sec'),
+          sec('Main','Rope Triceps Pushdown','3 × 10–12','60–90 sec'),
+          sec('Main','Overhead DB/EZ-Bar Triceps Extension','2 × 10–12','60–90 sec'),
+          sec('Posture','Face Pull','2 × 15','45–60 sec'),
+          sec('Posture','Chin Tucks','2 × 15','30 sec'),
+          sec('Core','Cable Crunch','3 × 10–15','60 sec'),
         ]
       },
       {
-        id: uid(), name: 'Pull (Thu)',
+        id: uid(), name: 'Thursday - Pull',
         exercises: [
-          sec('Warm-up','Rowing Machine','5 min'),
-          sec('Warm-up','Band Rows','2 × 20'),
-          sec('Main','Lat Pulldown','4 × 8–10'),
-          sec('Main','Chest Supported Row','3 × 8–10'),
-          sec('Main','Single-Arm Dumbbell Row','3 × 10/side'),
-          sec('Main','Reverse Pec Deck','3 × 12–15'),
-          sec('Main','Hammer Curl','3 × 10–12'),
-          sec('Main','Barbell Curl (or EZ-Bar Curl)','3 × 8–10'),
-          sec('Main','Concentration Curl','2 × 12/arm'),
-          sec('Posture','Face Pull','2 × 15'),
-          sec('Posture','Wall Slides','2 × 15'),
-          sec('Core','Hanging Knee Raise','2 × 12'),
-          sec('Core','Side Plank','2 × 30–45 sec'),
+          sec('Warm-up','Rowing Machine','5 min','-'),
+          sec('Warm-up','Band Rows','2 × 15–20','30 sec'),
+          sec('Main','Lat Pulldown','4 × 8–10','2 min'),
+          sec('Main','Chest-Supported Row','3 × 8–10','90–120 sec'),
+          sec('Main','Single-Arm DB Row','2 × 10–12/side','90 sec'),
+          sec('Main','Reverse Pec Deck','3 × 12–15','60 sec'),
+          sec('Main','Hammer Curl','3 × 10–12','60–90 sec'),
+          sec('Main','Barbell/EZ-Bar Curl','3 × 8–10','90 sec'),
+          sec('Main','Concentration Curl','2 × 12–15/arm','60 sec'),
+          sec('Posture','Wall Slides','2 × 15','30–45 sec'),
+          sec('Core','Hanging Knee Raise','3 × 10–15','60 sec'),
         ]
       },
       {
-        id: uid(), name: 'Legs (Fri)',
+        id: uid(), name: 'Friday - Legs',
         exercises: [
-          sec('Warm-up','Incline Walk','5 min'),
-          sec('Warm-up','Bodyweight Squats','2 × 15'),
-          sec('Warm-up','Glute Bridges','2 × 15'),
-          sec('Warm-up','Hip Flexor Stretch','30 sec/side'),
-          sec('Main','Hack Squat / Smith Squat','4 × 6–8'),
-          sec('Main','Romanian Deadlift','3 × 8–10'),
-          sec('Main','Leg Press','3 × 10–12'),
-          sec('Main','Leg Curl','3 × 10–12'),
-          sec('Main','Leg Extension','2 × 12–15'),
-          sec('Main','Standing Calf Raise','4 × 15–20'),
-          sec('Posture','Couch Stretch','2 × 30 sec/side'),
-          sec('Posture','Cat-Cow Stretch','2 × 10'),
-          sec('Core','Plank','3 × 45–60 sec'),
+          sec('Warm-up','Incline Walk','5 min','-'),
+          sec('Warm-up','Bodyweight Squat','2 × 10–15','30 sec'),
+          sec('Warm-up','Glute Bridge','2 × 15','30 sec'),
+          sec('Warm-up','Hip Flexor Stretch','30 sec/side','-'),
+          sec('Main','Smith Squat','3 × 6–8','2–3 min'),
+          sec('Main','Romanian Deadlift','3 × 8–10','2 min'),
+          sec('Main','Leg Press','3 × 10–12','90–120 sec'),
+          sec('Main','Leg Curl','3 × 10–12','60–90 sec'),
+          sec('Main','Leg Extension','3 × 12–15','60–90 sec'),
+          sec('Main','Smith Standing Calf Raise','4 × 10–15','60–90 sec'),
+          sec('Main','Leg Press Calf Raise','2 × 12–20','60 sec'),
+          sec('Mobility','Couch Stretch','2 × 30 sec/side','-'),
+          sec('Core','Plank','2 × 45–60 sec','60 sec'),
         ]
       },
       {
-        id: uid(), name: 'Upper Hypertrophy + Arms (Sat)',
+        id: uid(), name: 'Saturday - Upper + Arms + Calves',
         exercises: [
-          sec('Warm-up','Rowing Machine','5 min'),
-          sec('Warm-up','Band Pull-Aparts','2 × 20'),
-          sec('Main','Incline Machine Press','3 × 10–12'),
-          sec('Main','Neutral Grip Lat Pulldown','3 × 10–12'),
-          sec('Main','Machine Shoulder Press','3 × 10–12'),
-          sec('Main','Cable Lateral Raise','3 × 15'),
-          sec('Main','Incline Bench Curl','3 × 10–12'),
-          sec('Main','Overhead Rope Triceps Extension','3 × 10–12'),
-          sec('Posture','Face Pull','3 × 15'),
-          sec('Posture','Wall Slides','2 × 15'),
-          sec('Posture','Chin Tucks','2 × 15'),
-          sec('Core','Hanging Knee Raise','2 × 12'),
+          sec('Warm-up','Rowing Machine','5 min','-'),
+          sec('Warm-up','Band Pull-Aparts','2 × 15–20','30 sec'),
+          sec('Main','Incline Machine Press','3 × 8–12','90 sec'),
+          sec('Main','Neutral-Grip Lat Pulldown','3 × 8–12','90 sec'),
+          sec('Main','Machine Shoulder Press','2 × 10–12','90 sec'),
+          sec('Main','Cable Lateral Raise','3 × 12–15','60 sec'),
+          sec('Main','Incline DB Curl','3 × 10–12','60–90 sec'),
+          sec('Main','Overhead Rope Triceps Extension','3 × 10–12','60–90 sec'),
+          sec('Main','Seated Calf Raise (DB on knees)','3 × 12–20','60 sec'),
+          sec('Main','Tibialis Raise','2 × 15–20','45–60 sec'),
+          sec('Posture','Face Pull','2 × 15','45–60 sec'),
+          sec('Posture','Wall Slides','2 × 15','30 sec'),
+          sec('Core','Hanging Knee Raise','2 × 10–15','60 sec'),
         ]
       },
     ];
@@ -1844,6 +1848,16 @@
     showTab(activeBtn ? activeBtn.dataset.tab : 'today');
   }
 
+  async function applyRoutineUpdate20260824(){
+    const updateKey = 'routine_update_2026-08-24';
+    const alreadyApplied = await getJSON(updateKey, false);
+    if(alreadyApplied) return false;
+    plan = defaultPlan();
+    await setJSON('plan', plan);
+    await setJSON(updateKey, true);
+    return true;
+  }
+
   // one-time backfill of the Wed 15 July Push session with the actual numbers already logged on paper
   async function seedHistoricalPush15July(){
     const seededFlag = await getJSON('seed_push_2026-07-15', false);
@@ -1908,6 +1922,7 @@
       plan = storedPlan;
     }
     await seedHistoricalPush15July();
+    await applyRoutineUpdate20260824();
     await renderToday();
   }
   boot();
